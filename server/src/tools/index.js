@@ -1,5 +1,5 @@
 // Tool registry: name -> { description, input_schema, run }.
-// The schemas are what the LLM sees (Anthropic tool-use format, wired in on Day 2).
+// The schemas are what the LLM sees (JSON Schema; agent/loop.js wraps them as functions).
 // Every tool returns { cypher, params, data, summary, nodes, edges }; the agent loop
 // turns that into a trace event and the UI uses nodes/edges for highlighting.
 //
@@ -17,8 +17,8 @@ import { runReadonlyCypher } from './runReadonlyCypher.js';
 
 const accountId = { type: 'string', description: 'Account id, e.g. ACC0123' };
 const since = {
-  type: ['integer', 'string'],
-  description: 'Only consider transactions at/after this time (epoch ms or ISO date). Use it to focus on the incident window.',
+  type: 'string',
+  description: 'ISO date, e.g. 2026-10-10. Only transactions at/after this time are considered; use it to focus on the incident window.',
 };
 
 export const tools = {

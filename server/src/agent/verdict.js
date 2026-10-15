@@ -1,10 +1,9 @@
 // Verdict schema (SPEC 8.1) and validation.
 //
-// The model finishes by calling the submit_verdict tool. `strict: true` makes the API
-// guarantee the arguments match the JSON schema (types, enums, required fields). On top
-// of that, validateVerdict() checks the rules a schema can't express, such as "every ring
-// member must be an account the tools actually returned", so the agent can't name
-// accounts it never looked at.
+// The model finishes by calling the submit_verdict tool. The provider does not guarantee
+// the arguments match the schema, so validateVerdict() checks everything itself: types,
+// enums, and the rules a schema can't express, such as "every ring member must be an
+// account the tools actually returned", so the agent can't name accounts it never saw.
 //
 // `touched` is NOT produced by the model: the loop fills it from the trace (what the
 // tools really returned), so the highlighted subgraph is always grounded.
@@ -15,7 +14,6 @@ export const ROLES = ['victim', 'layer', 'collector', 'cashout'];
 export const SUBMIT_VERDICT_TOOL = {
   name: 'submit_verdict',
   description: 'Submit the final investigation verdict. Call exactly once, as the last step.',
-  strict: true,
   input_schema: {
     type: 'object',
     properties: {
@@ -62,6 +60,13 @@ export function validateVerdict(input, touchedNodes) {
     errors.push('evidence must be a non-empty array of non-empty strings');
   }
   if (!Array.isArray(v.recommended_actions)) errors.push('recommended_actions must be an array');
+  if (errors.length) return { ok: false, errors };
+
+  const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
+  if (v.ring_members.some((m) => !isObj(m) || typeof m.account_id !== 'string')) errors.push('each ring member needs a string account_id and a role');
+  if (v.recommended_actions.some((a) => !isObj(a) || a.tool !== 'freeze_account' || typeof a.account_id !== 'string' || typeof a.reason !== 'string')) {
+    errors.push("each action needs tool='freeze_account', a string account_id and a reason");
+  }
   if (errors.length) return { ok: false, errors };
 
   const roleOf = new Map();

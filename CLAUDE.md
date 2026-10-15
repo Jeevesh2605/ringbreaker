@@ -6,7 +6,7 @@ Read `SPEC.md` before any task. It is the source of truth for the schema, tool n
 An AI agent that investigates UPI mule rings in a FalkorDB graph, freezes accounts after human approval, and verifies with a query that no money path remains.
 
 ## Stack
-Node.js + Express, `falkordb` npm client, Anthropic SDK (tool use, model name from `MODEL` env var), React + Vite on the frontend. FalkorDB runs in Docker locally (graph name: `ring`).
+Node.js + Express, `falkordb` npm client, Groq via `groq-sdk` (function calling, model name from `MODEL` env var, key in `GROQ_API_KEY`), React + Vite on the frontend. FalkorDB runs in Docker locally (graph name: `ring`).
 
 ## How to work
 - Do one step at a time. After each step, run the relevant script or test and show me the output before moving on.

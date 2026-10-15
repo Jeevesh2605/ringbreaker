@@ -61,7 +61,7 @@ Data flow for one investigation:
 |---|---|---|
 | Graph DB | FalkorDB (Docker locally, FalkorDB Cloud or a container for deploy) | Required |
 | Backend | Node.js + Express, `falkordb` npm client | Comfortable stack, fast to build |
-| LLM | Claude via the Anthropic SDK with tool use; model name in env var `MODEL` | Strong tool calling |
+| LLM | Groq via `groq-sdk` (OpenAI-style function calling); model name in env var `MODEL` (default `openai/gpt-oss-120b`), key in `GROQ_API_KEY` | Free tier fits the budget. Changed from Anthropic on Oct 15 (budget). Free-tier limits (~8K tokens/min, ~200K tokens/day per model) shape the loop: compact tool results and context trimming |
 | Frontend | React + Vite, `react-force-graph-2d` (or Cytoscape.js) | Easy highlighting and animation |
 | Data generator | Plain Node script with a seeded RNG | Reproducible demos |
 | Deploy | Render/Fly/Railway for API + Vercel for UI; FalkorDB Cloud or a Docker service | Simple |
@@ -343,6 +343,6 @@ Scaffolding rule: do not create everything up front. Day 1 only needs `data/`, `
 ## 16. Open decisions to settle on Day 1
 
 - [ ] Hosting for FalkorDB (Cloud vs a container) and for the API/UI.
-- [ ] Which LLM model string to use in `MODEL`, and the budget cap.
+- [x] Which LLM model string to use in `MODEL`, and the budget cap. (Groq free tier, `openai/gpt-oss-120b`; per-run cap 120K tokens.)
 - [ ] Graph canvas library (react-force-graph vs Cytoscape).
 - [ ] Final project name and a one-line tagline for the submission.
