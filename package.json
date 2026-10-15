@@ -5,6 +5,7 @@
   "scripts": {
     "generate": "node data/generate.js",
     "seed": "node --env-file-if-exists=.env scripts/seed.js",
-    "tool": "node --env-file-if-exists=.env scripts/run-tool.js"
+    "tool": "node --env-file-if-exists=.env scripts/run-tool.js",
+    "eval": "node --env-file-if-exists=.env scripts/eval.js"
   }
 }
