@@ -1,0 +1,76 @@
+// Tool registry: name -> { description, input_schema, run }.
+// The schemas are what the LLM sees (Anthropic tool-use format, wired in on Day 2).
+// Every tool returns { cypher, params, data, summary, nodes, edges }; the agent loop
+// turns that into a trace event and the UI uses nodes/edges for highlighting.
+//
+// Edge IDs: SENT edges use their txn_id; other edges use "<from>>TYPE><to>".
+//
+// Day 1: specialized read tools only. run_readonly_cypher (+ guard.js) arrives on Day 2,
+// action tools on Day 3.
+import { getAlert } from './getAlert.js';
+import { accountProfile } from './accountProfile.js';
+import { moneyTrail } from './moneyTrail.js';
+import { fanStats } from './fanStats.js';
+import { sharedIdentity } from './sharedIdentity.js';
+import { expandRing } from './expandRing.js';
+
+const accountId = { type: 'string', description: 'Account id, e.g. ACC0123' };
+const since = {
+  type: ['integer', 'string'],
+  description: 'Only consider transactions at/after this time (epoch ms or ISO date). Use it to focus on the incident window.',
+};
+
+export const tools = {
+  get_alert: {
+    description: 'Fetch an alert and the account it is about. Always the first step of an investigation.',
+    input_schema: {
+      type: 'object',
+      properties: { alert_id: { type: 'string', description: 'Alert id, e.g. ALT001' } },
+      required: ['alert_id'],
+    },
+    run: getAlert,
+  },
+  account_profile: {
+    description: 'Account age, KYC level, status, VPAs, devices and phones (with how many accounts share each).',
+    input_schema: { type: 'object', properties: { account_id: accountId }, required: ['account_id'] },
+    run: accountProfile,
+  },
+  money_trail: {
+    description: 'Follow money forward (where it went) or backward (where it came from) up to max_hops, ' +
+      'returning the distinct transactions and accounts on those paths.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        account_id: accountId,
+        direction: { type: 'string', enum: ['forward', 'backward'] },
+        max_hops: { type: 'integer', minimum: 1, maximum: 4 },
+        since,
+      },
+      required: ['account_id', 'direction'],
+    },
+    run: moneyTrail,
+  },
+  fan_stats: {
+    description: 'In/out degree, totals, inbound time span and pass-through ratio for one account.',
+    input_schema: { type: 'object', properties: { account_id: accountId, since }, required: ['account_id'] },
+    run: fanStats,
+  },
+  shared_identity: {
+    description: 'Other accounts sharing a device or phone with this account, and whether they also exchange money with it.',
+    input_schema: { type: 'object', properties: { account_id: accountId }, required: ['account_id'] },
+    run: sharedIdentity,
+  },
+  expand_ring: {
+    description: 'Grow a candidate ring from seed accounts via money links and shared devices/phones (1-2 hops).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        seed_ids: { type: 'array', items: { type: 'string' }, minItems: 1 },
+        hops: { type: 'integer', minimum: 1, maximum: 2 },
+        since,
+      },
+      required: ['seed_ids'],
+    },
+    run: expandRing,
+  },
+};
