@@ -71,7 +71,8 @@ const isMalformedOutput = (e) => e instanceof Groq.BadRequestError &&
   MALFORMED_CODES.includes(e.error?.error?.code ?? e.error?.code);
 const MAX_MALFORMED_RETRIES = 2;
 
-export async function investigate(alertId, { onEvent = () => {} } = {}) {
+// signal (optional): cancels the run, e.g. when the browser closes the SSE stream.
+export async function investigate(alertId, { onEvent = () => {}, signal } = {}) {
   const model = process.env.MODEL;
   if (!model) throw new Error('MODEL env var is not set');
   const client = new Groq({ maxRetries: 4 }); // reads GROQ_API_KEY; retries 429s honouring Retry-After
@@ -79,6 +80,7 @@ export async function investigate(alertId, { onEvent = () => {} } = {}) {
   const started = Date.now();
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
+  signal?.addEventListener('abort', () => abort.abort(), { once: true });
 
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -189,7 +191,8 @@ export async function investigate(alertId, { onEvent = () => {} } = {}) {
     }
     throw new Error(`no valid verdict within ${MAX_STEPS} steps`);
   } catch (e) {
-    const message = abort.signal.aborted ? `timed out after ${TIMEOUT_MS} ms` : e.message;
+    const message = signal?.aborted ? 'cancelled by client'
+      : abort.signal.aborted ? `timed out after ${TIMEOUT_MS} ms` : e.message;
     onEvent({ type: 'error', message });
     throw new Error(message, { cause: e });
   } finally {

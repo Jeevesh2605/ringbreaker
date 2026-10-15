@@ -294,7 +294,7 @@ Scaffolding rule: do not create everything up front. Day 1 only needs `data/`, `
 - [ ] Acceptance: Ring A and B confirmed, Ring C reported as weak, merchant and family not flagged.
 
 **Day 3 (Oct 17): Actions, UI, deploy. Goal: full demo flow live.**
-- [ ] Action tools, approval flow, `verify_cutoff`.
+- [x] Action tools, approval flow, `verify_cutoff`.
 - [ ] SSE endpoint; React UI with the graph canvas, trace panel, verdict card, approve button, before/after badge.
 - [ ] Deploy API + UI + FalkorDB; test the live URL end to end.
 - [ ] Acceptance: the full demo runs on the deployed link.

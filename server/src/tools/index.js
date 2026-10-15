@@ -94,9 +94,11 @@ export const tools = {
 import { createCase } from './createCase.js';
 import { freezeAccount } from './freezeAccount.js';
 import { verifyCutoff } from './verifyCutoff.js';
+import { generateReport } from './generateReport.js';
 
 export const actions = {
   create_case: createCase,
   freeze_account: freezeAccount,
   verify_cutoff: verifyCutoff,
+  generate_report: generateReport,
 };
