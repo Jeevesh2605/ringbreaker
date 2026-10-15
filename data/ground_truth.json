@@ -1,0 +1,159 @@
+{
+  "rings": {
+    "A": {
+      "type": "layering_chain",
+      "victim_target": "ACC0438",
+      "cashout": "ACC1901",
+      "members": [
+        {
+          "account_id": "ACC0438",
+          "role": "victim"
+        },
+        {
+          "account_id": "ACC0862",
+          "role": "victim"
+        },
+        {
+          "account_id": "ACC0860",
+          "role": "victim"
+        },
+        {
+          "account_id": "ACC1657",
+          "role": "victim"
+        },
+        {
+          "account_id": "ACC1895",
+          "role": "layer"
+        },
+        {
+          "account_id": "ACC1896",
+          "role": "layer"
+        },
+        {
+          "account_id": "ACC1897",
+          "role": "layer"
+        },
+        {
+          "account_id": "ACC1898",
+          "role": "layer"
+        },
+        {
+          "account_id": "ACC1899",
+          "role": "layer"
+        },
+        {
+          "account_id": "ACC1900",
+          "role": "collector"
+        },
+        {
+          "account_id": "ACC1901",
+          "role": "cashout"
+        }
+      ],
+      "freeze": [
+        "ACC1895",
+        "ACC1896",
+        "ACC1897",
+        "ACC1898",
+        "ACC1899",
+        "ACC1900",
+        "ACC1901"
+      ]
+    },
+    "B": {
+      "type": "device_farm",
+      "members": [
+        {
+          "account_id": "ACC1902",
+          "role": "collector"
+        },
+        {
+          "account_id": "ACC1903",
+          "role": "collector"
+        },
+        {
+          "account_id": "ACC1904",
+          "role": "collector"
+        },
+        {
+          "account_id": "ACC1905",
+          "role": "collector"
+        },
+        {
+          "account_id": "ACC1906",
+          "role": "collector"
+        },
+        {
+          "account_id": "ACC1907",
+          "role": "collector"
+        },
+        {
+          "account_id": "ACC1908",
+          "role": "cashout"
+        }
+      ],
+      "freeze": [
+        "ACC1902",
+        "ACC1903",
+        "ACC1904",
+        "ACC1905",
+        "ACC1906",
+        "ACC1907",
+        "ACC1908"
+      ],
+      "shared_devices": [
+        "DEV02112",
+        "DEV02113"
+      ],
+      "shared_phone": "+91-0010189954"
+    },
+    "C": {
+      "type": "decoy_shared_device",
+      "members": [
+        "ACC1909",
+        "ACC1910",
+        "ACC1911"
+      ],
+      "freeze": []
+    }
+  },
+  "benign": {
+    "merchant": "ACC1889",
+    "family": [
+      "ACC1891",
+      "ACC1892",
+      "ACC1893",
+      "ACC1894"
+    ]
+  },
+  "alerts": {
+    "ALT001": {
+      "ring": "A",
+      "expected_verdict": "ring_confirmed"
+    },
+    "ALT002": {
+      "ring": "B",
+      "expected_verdict": "ring_confirmed"
+    },
+    "ALT003": {
+      "ring": "B",
+      "expected_verdict": "ring_confirmed"
+    },
+    "ALT004": {
+      "ring": "C",
+      "expected_verdict": "suspicious"
+    },
+    "ALT005": {
+      "ring": null,
+      "expected_verdict": "benign"
+    },
+    "ALT006": {
+      "ring": null,
+      "expected_verdict": "benign"
+    },
+    "ALT007": {
+      "ring": null,
+      "expected_verdict": "benign"
+    }
+  }
+}
