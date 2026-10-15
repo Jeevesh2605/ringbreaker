@@ -287,10 +287,10 @@ Scaffolding rule: do not create everything up front. Day 1 only needs `data/`, `
 - [x] Acceptance: from a terminal, I can call `money_trail` on Ring A's victim and get the full chain.
 
 **Day 2 (Oct 16): The agent. Goal: it solves all alerts from the terminal.**
-- [ ] Agent loop with tool calling, step cap, structured verdict validation.
-- [ ] Trace events (cypher, summary, touched IDs).
+- [x] Agent loop with tool calling, step cap, structured verdict validation.
+- [x] Trace events (cypher, summary, touched IDs).
 - [x] Free-form Cypher guard.
-- [ ] Eval script: run all alerts, compare to `ground_truth.json`.
+- [x] Eval script: run all alerts, compare to `ground_truth.json`.
 - [ ] Acceptance: Ring A and B confirmed, Ring C reported as weak, merchant and family not flagged.
 
 **Day 3 (Oct 17): Actions, UI, deploy. Goal: full demo flow live.**

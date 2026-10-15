@@ -31,6 +31,7 @@ const neverFreeze = new Set([
 function printEvent(e) {
   if (e.type === 'tool') console.log(`   [${e.step}] ${e.tool} ${JSON.stringify(e.args)} -> ${e.summary} (${e.ms}ms)`);
   else if (e.type === 'verdict_rejected') console.log(`   [${e.step}] verdict rejected: ${e.errors.join('; ')}`);
+  else if (e.type === 'retry') console.log(`   [${e.step}] retry: ${e.reason}`);
   else if (e.type === 'error') console.log(`   error: ${e.message}`);
 }
 

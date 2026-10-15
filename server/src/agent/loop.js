@@ -2,7 +2,8 @@
 // LLM provider: Groq (OpenAI-style chat completions with function calling), model from MODEL.
 //
 // We write this loop by hand so every safety limit is explicit and visible in one place:
-//   - MAX_STEPS model turns (10). On the last turn the model is told to submit.
+//   - MAX_STEPS model turns (10). On the LAST turn the model is offered only submit_verdict
+//     and must call a tool, so a run can't end without a verdict just by running out of steps.
 //   - TIMEOUT_MS wall clock for the whole run (aborts the in-flight API request too).
 //   - TOKEN_CAP total tokens across all turns (protects the daily token quota).
 //   - CONTEXT_BUDGET: Groq's free/dev tiers allow only ~8K tokens PER MINUTE, and every turn
@@ -17,7 +18,7 @@ import { SYSTEM_PROMPT, userMessage } from './prompt.js';
 import { SUBMIT_VERDICT_TOOL, validateVerdict } from './verdict.js';
 
 export const MAX_STEPS = 10;
-export const TIMEOUT_MS = 300_000;       // generous: a 429 retry can wait up to a minute
+export const TIMEOUT_MS = 600_000;       // at 8K tokens/min a 10-step run needs ~5-7 minutes
 export const TOKEN_CAP = 120_000;        // per investigation
 const CONTEXT_BUDGET_TOKENS = 5_500;      // estimated prompt size we try to stay under
 const MAX_RESULT_CHARS = 4_000;           // ~1.1K tokens: cap for a single tool result
@@ -28,6 +29,7 @@ const API_TOOLS = [
   ...Object.entries(tools).map(([name, t]) => ({ name, description: t.description, input_schema: t.input_schema })),
   SUBMIT_VERDICT_TOOL,
 ].map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } }));
+const SUBMIT_ONLY = API_TOOLS.filter((t) => t.function.name === 'submit_verdict');
 
 // Rough token estimate (~4 chars per token). Good enough to decide when to trim.
 const estimateTokens = (messages) =>
@@ -61,8 +63,13 @@ const forApi = (messages) => messages.map(({ trimmed, ...m }) => m);
 function parseArgs(raw) {
   try { return { args: JSON.parse(raw || '{}') }; } catch { return { error: 'arguments were not valid JSON' }; }
 }
-const isToolUseFailed = (e) => e instanceof Groq.BadRequestError &&
-  (e.error?.error?.code ?? e.error?.code) === 'tool_use_failed';
+// Groq rejects a turn with 400 when the model's output can't be parsed into a tool call:
+// tool_use_failed (malformed call) or output_parse_failed (e.g. it wrote its reasoning as
+// plain text). Both are sampling failures, so we re-sample the same turn.
+const MALFORMED_CODES = ['tool_use_failed', 'output_parse_failed'];
+const isMalformedOutput = (e) => e instanceof Groq.BadRequestError &&
+  MALFORMED_CODES.includes(e.error?.error?.code ?? e.error?.code);
+const MAX_MALFORMED_RETRIES = 2;
 
 export async function investigate(alertId, { onEvent = () => {} } = {}) {
   const model = process.env.MODEL;
@@ -83,25 +90,26 @@ export async function investigate(alertId, { onEvent = () => {} } = {}) {
   const touchedEdges = new Set();
   const usage = { prompt_tokens: 0, completion_tokens: 0 };
   let verdictRetryUsed = false;
-  let malformedRetryUsed = false;
+  let malformedRetries = 0;
 
   try {
     for (let step = 1; step <= MAX_STEPS; step++) {
       trimContext(messages, summaries);
+      const lastStep = step === MAX_STEPS;
       let response;
       try {
         response = await client.chat.completions.create(
-          { model, messages: forApi(messages), tools: API_TOOLS, tool_choice: 'auto',
+          { model, messages: forApi(messages),
+            // Last turn: only submit_verdict is offered and a tool call is required.
+            tools: lastStep ? SUBMIT_ONLY : API_TOOLS, tool_choice: lastStep ? 'required' : 'auto',
             max_completion_tokens: MAX_COMPLETION_TOKENS, temperature: 0.2 },
           { signal: abort.signal },
         );
       } catch (e) {
-        // Groq returns 400 tool_use_failed when the model emits a malformed tool call.
-        // Retry that turn once; it usually succeeds on a second sample.
-        if (isToolUseFailed(e) && !malformedRetryUsed) {
-          malformedRetryUsed = true;
-          onEvent({ type: 'retry', step, reason: 'model produced a malformed tool call' });
-          step--;
+        if (isMalformedOutput(e) && malformedRetries < MAX_MALFORMED_RETRIES) {
+          malformedRetries++;
+          onEvent({ type: 'retry', step, reason: `model output could not be parsed (${e.error?.error?.code ?? e.error?.code})` });
+          step--; // the failed sample doesn't count as a step
           continue;
         }
         throw e;
@@ -176,7 +184,7 @@ export async function investigate(alertId, { onEvent = () => {} } = {}) {
       }
 
       if (step === MAX_STEPS - 1) {
-        messages.push({ role: 'user', content: 'Step limit reached: your next turn must call submit_verdict with what you have.' });
+        messages.push({ role: 'user', content: 'Step limit reached: your next turn is the last one. Call submit_verdict with what you have.' });
       }
     }
     throw new Error(`no valid verdict within ${MAX_STEPS} steps`);
