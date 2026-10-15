@@ -289,7 +289,7 @@ Scaffolding rule: do not create everything up front. Day 1 only needs `data/`, `
 **Day 2 (Oct 16): The agent. Goal: it solves all alerts from the terminal.**
 - [ ] Agent loop with tool calling, step cap, structured verdict validation.
 - [ ] Trace events (cypher, summary, touched IDs).
-- [ ] Free-form Cypher guard.
+- [x] Free-form Cypher guard.
 - [ ] Eval script: run all alerts, compare to `ground_truth.json`.
 - [ ] Acceptance: Ring A and B confirmed, Ring C reported as weak, merchant and family not flagged.
 

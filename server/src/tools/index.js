@@ -5,14 +5,15 @@
 //
 // Edge IDs: SENT edges use their txn_id; other edges use "<from>>TYPE><to>".
 //
-// Day 1: specialized read tools only. run_readonly_cypher (+ guard.js) arrives on Day 2,
-// action tools on Day 3.
+// This registry holds READ tools only; it is exactly what the agent can call. Action tools
+// (freeze etc., Day 3) live behind the approval API and are never offered to the model.
 import { getAlert } from './getAlert.js';
 import { accountProfile } from './accountProfile.js';
 import { moneyTrail } from './moneyTrail.js';
 import { fanStats } from './fanStats.js';
 import { sharedIdentity } from './sharedIdentity.js';
 import { expandRing } from './expandRing.js';
+import { runReadonlyCypher } from './runReadonlyCypher.js';
 
 const accountId = { type: 'string', description: 'Account id, e.g. ACC0123' };
 const since = {
@@ -72,5 +73,17 @@ export const tools = {
       required: ['seed_ids'],
     },
     run: expandRing,
+  },
+  run_readonly_cypher: {
+    description: 'Guarded free-form read-only Cypher, only when no specialized tool fits. ' +
+      'Graph: (:Account {id,holder,created_at,kyc_level,status,balance}), (:VPA {handle}), (:Device {id,os}), ' +
+      '(:Phone {number}), (:Alert {id,type,created_at,summary}); edges HAS_VPA, USES_DEVICE {last_seen}, LINKED_PHONE, ' +
+      'SENT {txn_id,amount,ts}, ABOUT. Write keywords and CALL are rejected; results are capped at 100 rows.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'A single read-only Cypher query' } },
+      required: ['query'],
+    },
+    run: runReadonlyCypher,
   },
 };
