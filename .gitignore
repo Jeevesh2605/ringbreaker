@@ -1,0 +1,15 @@
+# Secrets: never commit. Copy .env.example to .env and fill it in.
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+dist/
+
+# Generated synthetic data (reproducible from data/generate.js with the fixed seed)
+data/out/
+
+# OS / editor noise
+.DS_Store
+*.log
