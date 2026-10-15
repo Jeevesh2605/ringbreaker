@@ -87,3 +87,16 @@ export const tools = {
     run: runReadonlyCypher,
   },
 };
+
+// ACTION tools (Day 3). Deliberately NOT part of `tools` above: the agent loop only offers
+// `tools` to the model, so the model can never call these. They run from the API
+// (create_case after an investigation; freeze + verify after human approval).
+import { createCase } from './createCase.js';
+import { freezeAccount } from './freezeAccount.js';
+import { verifyCutoff } from './verifyCutoff.js';
+
+export const actions = {
+  create_case: createCase,
+  freeze_account: freezeAccount,
+  verify_cutoff: verifyCutoff,
+};
