@@ -64,7 +64,7 @@ Data flow for one investigation:
 | LLM | Groq via `groq-sdk` (OpenAI-style function calling); model name in env var `MODEL` (default `openai/gpt-oss-120b`), key in `GROQ_API_KEY` | Free tier fits the budget. Changed from Anthropic on Oct 15 (budget). Free-tier limits (~8K tokens/min, ~200K tokens/day per model) shape the loop: compact tool results and context trimming |
 | Frontend | React + Vite, `react-force-graph-2d` (or Cytoscape.js) | Easy highlighting and animation |
 | Data generator | Plain Node script with a seeded RNG | Reproducible demos |
-| Deploy | Render/Fly/Railway for API + Vercel for UI; FalkorDB Cloud or a Docker service | Simple |
+| Deploy | One Docker image on Render (free web service): Express serves the API and the built UI on one URL; FalkorDB Cloud for the graph. Decided Oct 16 | One URL, no CORS, fewest moving parts on demo day |
 
 Local FalkorDB:
 ```bash
@@ -342,7 +342,7 @@ Scaffolding rule: do not create everything up front. Day 1 only needs `data/`, `
 
 ## 16. Open decisions to settle on Day 1
 
-- [ ] Hosting for FalkorDB (Cloud vs a container) and for the API/UI.
-- [x] Which LLM model string to use in `MODEL`, and the budget cap. (Groq free tier, `openai/gpt-oss-120b`; per-run cap 120K tokens.)
-- [ ] Graph canvas library (react-force-graph vs Cytoscape).
+- [x] Hosting: FalkorDB Cloud for the graph; API + UI in one container on Render (`Dockerfile`, `render.yaml`). Local fallback: `docker compose --profile app up`.
+- [x] Which LLM model string to use in `MODEL`, and the budget cap. (Groq free tier, `openai/gpt-oss-120b`; per-run cap 120K tokens. `FALLBACK_MODEL=qwen/qwen3.8-27b` takes over mid-run when MODEL's daily quota runs out.)
+- [x] Graph canvas library: `react-force-graph-2d`.
 - [ ] Final project name and a one-line tagline for the submission.

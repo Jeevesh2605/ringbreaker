@@ -23,7 +23,8 @@ investigateRouter.post('/investigate', async (req, res) => {
   if (running) return res.status(409).json({ error: `investigation of ${running} already running` });
   running = alertId;
 
-  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no' }); // ask reverse proxies (e.g. Render's) not to buffer the stream
   const send = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
   // Comment lines keep proxies from closing the stream during long rate-limit waits.
   const heartbeat = setInterval(() => res.write(': keep-alive\n\n'), 15000);

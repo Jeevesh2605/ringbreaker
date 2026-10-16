@@ -1,0 +1,10 @@
+# Keep secrets and local artifacts out of the build context.
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+data/out
+.git
+.DS_Store
+*.log

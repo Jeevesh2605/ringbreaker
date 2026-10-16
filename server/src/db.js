@@ -18,6 +18,8 @@ function connect() {
       socket: {
         host: process.env.FALKORDB_HOST || 'localhost',
         port: Number(process.env.FALKORDB_PORT || 6379),
+        // FALKORDB_TLS=true for hosted FalkorDB that requires TLS; local Docker is plain TCP.
+        ...(process.env.FALKORDB_TLS === 'true' ? { tls: true, servername: process.env.FALKORDB_HOST } : {}),
       },
       username: process.env.FALKORDB_USERNAME || undefined,
       password: process.env.FALKORDB_PASSWORD || undefined,

@@ -1,4 +1,6 @@
-# Local FalkorDB. The api and web services get added here on Day 3.
+# Local FalkorDB (dev):          docker compose up -d
+# Whole app in containers:      docker compose --profile app up -d --build
+#                               then once: curl -X POST localhost:8080/api/admin/reseed -H "x-admin-secret: $ADMIN_SECRET"
 services:
   falkordb:
     image: falkordb/falkordb:latest
@@ -6,3 +8,19 @@ services:
       - "6379:6379" # database (Redis protocol)
       - "3000:3000" # FalkorDB Browser UI
     # No volume on purpose: the demo graph is reproducible via `npm run seed`.
+
+  # The same single image Render runs: API + built UI on one port.
+  app:
+    profiles: ["app"] # opt-in, so `docker compose up -d` stays DB-only for local dev
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FALKORDB_HOST: falkordb # the compose service name, not localhost
+      FALKORDB_PORT: "6379"
+      FALKORDB_TLS: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - falkordb

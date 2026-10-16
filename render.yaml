@@ -1,0 +1,34 @@
+# Render Blueprint: one free web service built from ./Dockerfile (API + UI on one URL).
+# Render > New > Blueprint > pick this repo. Values marked sync:false are prompted for in the
+# dashboard and never stored in git.
+services:
+  - type: web
+    name: ringbreaker
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      # FalkorDB Cloud instance (copy from its connection details)
+      - key: FALKORDB_HOST
+        sync: false
+      - key: FALKORDB_PORT
+        sync: false
+      - key: FALKORDB_USERNAME
+        sync: false
+      - key: FALKORDB_PASSWORD
+        sync: false
+      - key: FALKORDB_TLS
+        value: "false"
+      - key: FALKORDB_GRAPH
+        value: ring
+      # Groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MODEL
+        value: openai/gpt-oss-120b
+      - key: FALLBACK_MODEL
+        value: qwen/qwen3.8-27b
+      # Protects POST /api/admin/reseed; Render generates a random value
+      - key: ADMIN_SECRET
+        generateValue: true
