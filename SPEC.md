@@ -291,7 +291,7 @@ Scaffolding rule: do not create everything up front. Day 1 only needs `data/`, `
 - [x] Trace events (cypher, summary, touched IDs).
 - [x] Free-form Cypher guard.
 - [x] Eval script: run all alerts, compare to `ground_truth.json`.
-- [ ] Acceptance: Ring A and B confirmed, Ring C reported as weak, merchant and family not flagged.
+- [x] Acceptance: Ring A and B confirmed, Ring C reported as weak, merchant and family not flagged. (Oct 16: 7/7 alerts correct, 0 unsafe freezes; ALT003 re-run separately after a quota/context failure.)
 
 **Day 3 (Oct 17): Actions, UI, deploy. Goal: full demo flow live.**
 - [x] Action tools, approval flow, `verify_cutoff`.

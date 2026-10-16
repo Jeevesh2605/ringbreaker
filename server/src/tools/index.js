@@ -78,7 +78,11 @@ export const tools = {
     description: 'Guarded free-form read-only Cypher, only when no specialized tool fits. ' +
       'Graph: (:Account {id,holder,created_at,kyc_level,status,balance}), (:VPA {handle}), (:Device {id,os}), ' +
       '(:Phone {number}), (:Alert {id,type,created_at,summary}); edges HAS_VPA, USES_DEVICE {last_seen}, LINKED_PHONE, ' +
-      'SENT {txn_id,amount,ts}, ABOUT. Write keywords and CALL are rejected; results are capped at 100 rows.',
+      'SENT {txn_id,amount,ts}, ABOUT. Write keywords and CALL are rejected; results are capped at 100 rows. ' +
+      // Seen in the Oct 16 eval (ALT003): the model compared ts to '2026-10-08', which matches
+      // nothing because times are numbers, then wasted its remaining steps on empty results.
+      'All times (created_at, ts, last_seen) are epoch MILLISECONDS stored as numbers: compare with numbers, ' +
+      'e.g. s.ts >= 1791417600000 for 2026-10-08T00:00Z. A date string never matches.',
     input_schema: {
       type: 'object',
       properties: { query: { type: 'string', description: 'A single read-only Cypher query' } },
