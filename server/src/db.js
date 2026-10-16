@@ -21,6 +21,12 @@ function connect() {
       },
       username: process.env.FALKORDB_USERNAME || undefined,
       password: process.env.FALKORDB_PASSWORD || undefined,
+    }).then((db) => {
+      // Without an 'error' listener, Node treats a dropped DB socket as an uncaught error and
+      // kills the whole API. Log it instead; the underlying redis client reconnects by itself,
+      // and queries made while it is down fail with an error the routes already handle.
+      db.on('error', (e) => console.error('FalkorDB connection error:', e.message));
+      return db;
     });
   }
   return dbPromise;
