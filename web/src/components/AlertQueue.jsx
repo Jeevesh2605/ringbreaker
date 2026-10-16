@@ -2,11 +2,11 @@
 // Alert summaries come from graph data, so they are rendered as plain text (React escapes it).
 const TYPE_LABEL = { victim_complaint: 'Victim complaint', velocity: 'Velocity', fan_in: 'Fan-in' };
 
-export default function AlertQueue({ alerts, selected, busy, onPick, error }) {
+export default function AlertQueue({ alerts, selected, busy, onPick, error, onRetry }) {
   return (
     <aside className="pane alerts">
       <h2>Alerts</h2>
-      {error && <p className="err">{error}</p>}
+      {error && <p className="err">{error} <button className="link" onClick={onRetry}>Retry</button></p>}
       <ul>
         {alerts.map((a) => (
           <li key={a.id}>

@@ -12,6 +12,22 @@ import VerdictCard from './components/VerdictCard.jsx';
 import * as api from './lib/api.js';
 
 const MAX_IDS = 400; // the subgraph endpoint's limit
+const PASS_KEY = 'ringbreaker.passcode';
+
+// Browser storage can throw (private mode, blocked site data): it is only a convenience.
+const browserStore = {
+  get: (k) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } },
+  set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch { /* ignore */ } },
+};
+
+// Turn API errors into something a demo viewer can act on.
+function explain(e) {
+  if (e.code === 'passcode') return 'This action needs the demo passcode (top right).';
+  if (e.status === 409) return `${e.message}. Only one investigation runs at a time on the free LLM tier; try again shortly.`;
+  if (/daily token quota exhausted/.test(e.message)) return `${e.message}. The free LLM quota refills over the day; try again later.`;
+  if (e instanceof TypeError) return 'Cannot reach the server. If the demo has been idle, it may be waking up (about a minute).';
+  return e.message;
+}
 
 export default function App() {
   const [alerts, setAlerts] = useState([]);
@@ -26,13 +42,46 @@ export default function App() {
   const [graph, setGraph] = useState({ nodes: [], links: [] });
   const [latest, setLatest] = useState(new Set());
   const [touched, setTouched] = useState(new Set());
+  const [passRequired, setPassRequired] = useState(false);
+  const [passInput, setPassInput] = useState(() => browserStore.get(PASS_KEY));
+  const [passOk, setPassOk] = useState(false);
+  const [notice, setNotice] = useState(null);
 
   // Node/link objects by id, kept across fetches so the layout keeps their positions.
   const store = useRef({ nodes: new Map(), links: new Map() });
   const abort = useRef(null);
 
-  const loadAlerts = () => api.getAlerts().then(setAlerts, (e) => setAlertsError(`Could not load alerts: ${e.message}`));
+  const loadAlerts = () => api.getAlerts().then(
+    (a) => { setAlerts(a); setAlertsError(null); },
+    (e) => setAlertsError(`Could not load alerts. ${explain(e)}`));
   useEffect(() => { loadAlerts(); }, []);
+
+  // Ask the server whether a passcode is needed; re-check a remembered one.
+  useEffect(() => {
+    api.getConfig().then(({ passcodeRequired }) => {
+      setPassRequired(passcodeRequired);
+      if (passcodeRequired && passInput) unlock(passInput);
+    }, () => {});
+  }, []);
+
+  async function unlock(p = passInput) {
+    try {
+      const { ok } = await api.checkPasscode(p);
+      setPassOk(ok);
+      if (ok) { api.setPasscode(p); browserStore.set(PASS_KEY, p); setNotice(null); }
+      else { browserStore.set(PASS_KEY, ''); setNotice('Wrong passcode.'); }
+    } catch (e) { setNotice(explain(e)); }
+  }
+
+  async function resetDemo() {
+    const secret = window.prompt('Admin secret to reset the demo graph (unfreezes all accounts, removes cases):');
+    if (!secret) return;
+    try {
+      await api.reseed(secret);
+      reset(); setAlert(null); loadAlerts();
+      setNotice('Demo graph reset.');
+    } catch (e) { setNotice(e.status === 403 ? 'Wrong admin secret.' : explain(e)); }
+  }
 
   useEffect(() => {
     if (!running) return;
@@ -63,6 +112,8 @@ export default function App() {
   }
 
   async function pick(a) {
+    if (passRequired && !passOk) { setNotice('Enter the demo passcode (top right) to run an investigation.'); return; }
+    setNotice(null);
     reset();
     setAlert(a);
     setRunning(true);
@@ -83,7 +134,7 @@ export default function App() {
         }
       }, abort.current.signal);
     } catch (e) {
-      if (e.name !== 'AbortError') setEvents((ev) => [...ev, { type: 'error', message: e.message }]);
+      if (e.name !== 'AbortError') setEvents((ev) => [...ev, { type: 'error', message: explain(e) }]);
     } finally {
       setRunning(false);
     }
@@ -96,7 +147,7 @@ export default function App() {
       await addToGraph([]); // refresh statuses: frozen accounts turn red
       loadAlerts();
     } catch (e) {
-      setApproval({ error: e.message });
+      setApproval({ error: explain(e) });
     }
   }
 
@@ -111,9 +162,19 @@ export default function App() {
       <header>
         <h1>RingBreaker</h1>
         <span className="muted">Investigate a UPI mule ring, freeze it with approval, prove the cut-off. Synthetic data.</span>
+        <div className="controls">
+          {passRequired && (passOk ? <span className="ok-text">Passcode accepted</span> : (
+            <form onSubmit={(e) => { e.preventDefault(); unlock(); }}>
+              <input type="password" placeholder="Demo passcode" value={passInput} onChange={(e) => setPassInput(e.target.value)} />
+              <button className="secondary" disabled={!passInput}>Unlock</button>
+            </form>
+          ))}
+          <button className="secondary" disabled={running} onClick={resetDemo}>Reset demo</button>
+        </div>
       </header>
+      {notice && <div className="notice" onClick={() => setNotice(null)}>{notice}</div>}
       <main>
-        <AlertQueue alerts={alerts} selected={alert?.id} busy={running} onPick={pick} error={alertsError} />
+        <AlertQueue alerts={alerts} selected={alert?.id} busy={running} onPick={pick} error={alertsError} onRetry={loadAlerts} />
         <GraphCanvas graph={graph} latest={latest} touched={touched} roles={roles} />
         <aside className="pane right">
           {running && <button className="secondary" onClick={() => abort.current?.abort()}>Stop run</button>}

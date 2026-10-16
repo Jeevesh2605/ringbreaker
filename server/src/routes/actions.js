@@ -7,11 +7,12 @@
 // No auth (non-goal in SPEC 2): approvedBy is a name typed in the UI, stored on every
 // audit edge.
 import { Router } from 'express';
+import { requirePasscode } from '../passcode.js';
 import { actions } from '../tools/index.js';
 
 export const actionsRouter = Router();
 
-actionsRouter.post('/actions/approve', async (req, res, next) => {
+actionsRouter.post('/actions/approve', requirePasscode, async (req, res, next) => {
   try {
     const { caseId, approvedBy } = req.body ?? {};
     // Accept ["ACC1", ...] or [{account_id: "ACC1"}, ...].

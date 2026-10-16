@@ -29,6 +29,9 @@ services:
         value: openai/gpt-oss-120b
       - key: FALLBACK_MODEL
         value: qwen/qwen3.8-27b
+      # Required to run investigations and approve freezes on the public link (share with judges)
+      - key: DEMO_PASSCODE
+        sync: false
       # Protects POST /api/admin/reseed; Render generates a random value
       - key: ADMIN_SECRET
         generateValue: true

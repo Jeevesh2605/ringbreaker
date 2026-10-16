@@ -11,13 +11,14 @@
 // Only ONE investigation runs at a time: the Groq free tier allows ~8K tokens/minute, and two
 // parallel runs would just throttle each other.
 import { Router } from 'express';
+import { requirePasscode } from '../passcode.js';
 import { investigate } from '../agent/loop.js';
 import { actions } from '../tools/index.js';
 
 export const investigateRouter = Router();
 let running = null; // alertId of the run in progress
 
-investigateRouter.post('/investigate', async (req, res) => {
+investigateRouter.post('/investigate', requirePasscode, async (req, res) => {
   const alertId = req.body?.alertId;
   if (typeof alertId !== 'string' || !/^ALT\d+$/.test(alertId)) return res.status(400).json({ error: 'alertId like ALT001 is required' });
   if (running) return res.status(409).json({ error: `investigation of ${running} already running` });

@@ -8,12 +8,16 @@ import { investigateRouter } from './routes/investigate.js';
 import { actionsRouter } from './routes/actions.js';
 import { graphRouter } from './routes/graph.js';
 import { adminRouter } from './routes/admin.js';
+import { passcodeOk } from './passcode.js';
 
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '50kb' }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+// Lets the UI know whether to ask for the demo passcode, and check one before a run.
+app.get('/api/config', (req, res) => res.json({ passcodeRequired: Boolean(process.env.DEMO_PASSCODE) }));
+app.post('/api/passcode/check', (req, res) => res.json({ ok: passcodeOk(req.get('x-demo-passcode')) }));
 app.use('/api', alertsRouter, investigateRouter, actionsRouter, graphRouter, adminRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'not found' }));

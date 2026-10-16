@@ -3,11 +3,23 @@
 // Deploy: set VITE_API_URL to the API origin, e.g. https://ringbreaker-api.example.com
 const BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
+// Demo passcode (server/src/passcode.js): sent on the two costly routes only.
+let passcode = '';
+export const setPasscode = (p) => { passcode = p; };
+const withPasscode = (headers) => (passcode ? { ...headers, 'x-demo-passcode': passcode } : headers);
+
+// Errors carry the HTTP status and the server's error code, so the UI can explain them.
 async function json(res) {
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(body.error ?? `HTTP ${res.status}`), { status: res.status, code: body.code });
   return body;
 }
+
+export const getConfig = () => fetch(`${BASE}/api/config`).then(json);
+export const checkPasscode = (p) =>
+  fetch(`${BASE}/api/passcode/check`, { method: 'POST', headers: { 'x-demo-passcode': p } }).then(json);
+export const reseed = (adminSecret) =>
+  fetch(`${BASE}/api/admin/reseed`, { method: 'POST', headers: { 'x-admin-secret': adminSecret } }).then(json);
 
 export const getAlerts = () => fetch(`${BASE}/api/alerts`).then(json);
 
@@ -17,7 +29,7 @@ export const getSubgraph = (ids) =>
 export const approve = (caseId, accountIds, approvedBy) =>
   fetch(`${BASE}/api/actions/approve`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withPasscode({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ caseId, actions: accountIds, approvedBy }),
   }).then(json);
 
@@ -33,14 +45,15 @@ export async function getReport(caseId) {
 export async function investigate(alertId, onEvent, signal) {
   const res = await fetch(`${BASE}/api/investigate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withPasscode({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ alertId }),
     signal,
   });
-  if (!res.ok) await json(res); // throws with the server's error message (e.g. 409 busy)
+  if (!res.ok) await json(res); // throws with the server's error (401 passcode, 409 busy)
 
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buf = '';
+  let finished = false; // saw the final verdict or error event
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -50,7 +63,13 @@ export async function investigate(alertId, onEvent, signal) {
       const block = buf.slice(0, cut);
       buf = buf.slice(cut + 2);
       const data = block.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n');
-      if (data) onEvent(JSON.parse(data));
+      if (data) {
+        const event = JSON.parse(data);
+        if (event.type === 'verdict' || event.type === 'error') finished = true;
+        onEvent(event);
+      }
     }
   }
+  // The connection closed without a verdict: server restart, proxy timeout, network drop.
+  if (!finished) throw new Error('the connection to the server dropped before the agent finished; try again');
 }
