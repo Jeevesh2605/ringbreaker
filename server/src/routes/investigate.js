@@ -3,7 +3,7 @@
 // Event stream (each line "data: <json>"):
 //   {type:'start', alertId}
 //   {type:'tool', step, tool, args, cypher, summary, nodes, edges, ms}   one per tool call
-//   {type:'retry' | 'verdict_rejected', ...}                             loop housekeeping
+//   {type:'retry' | 'verdict_rejected' | 'model_switch', ...}            loop housekeeping
 //   {type:'verdict', verdict, caseId}   final; the verdict is saved as a Case for approval
 //   {type:'error', message}
 //
@@ -40,7 +40,7 @@ investigateRouter.post('/investigate', async (req, res) => {
       onEvent: (e) => { if (e.type !== 'verdict' && e.type !== 'error') send(e); },
     });
     const kase = await actions.create_case({ alert_id: alertId, verdict: run.verdict });
-    send({ type: 'verdict', verdict: run.verdict, caseId: kase.data.case_id, steps: run.steps, usage: run.usage, ms: run.ms });
+    send({ type: 'verdict', verdict: run.verdict, caseId: kase.data.case_id, steps: run.steps, usage: run.usage, ms: run.ms, models: run.models });
   } catch (e) {
     send({ type: 'error', message: e.message });
   } finally {

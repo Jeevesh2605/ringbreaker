@@ -12,6 +12,9 @@
 //   - Each tool call emits a trace event (tool, args, cypher, summary, touched ids).
 //   - The run ends only through submit_verdict + validateVerdict (one retry if invalid).
 //   - Only READ tools are offered. The agent can recommend a freeze but has no tool to do it.
+//   - Model fallback: Groq's daily token quota is per MODEL. If MODEL's daily quota runs out
+//     mid-run, the loop switches to FALLBACK_MODEL and continues from the same step with the
+//     same conversation, so the run still finishes. Emits a model_switch trace event.
 import Groq from 'groq-sdk';
 import { tools } from '../tools/index.js';
 import { SYSTEM_PROMPT, userMessage } from './prompt.js';
@@ -71,11 +74,32 @@ const isMalformedOutput = (e) => e instanceof Groq.BadRequestError &&
   MALFORMED_CODES.includes(e.error?.error?.code ?? e.error?.code);
 const MAX_MALFORMED_RETRIES = 2;
 
+// Daily quota exhausted: 429 whose message names a per-day limit, e.g. "Rate limit reached for
+// model `openai/gpt-oss-120b` ... on tokens per day (TPD): Limit 200000 ...". Waiting won't
+// help (resets take hours), unlike the per-minute limits (TPM/RPM) the SDK already retries.
+const DAILY_LIMIT_RE = /per day \((TPD|RPD)\)/;
+export const isDailyQuotaError = (e) => e instanceof Groq.RateLimitError && DAILY_LIMIT_RE.test(e.message ?? '');
+
+// "Request too large ... output tokens per minute (OTPM): Limit 1000, Requested 1263": some
+// models (e.g. qwen/qwen3.8-27b) cap output per minute below our max_completion_tokens, and
+// Groq rejects the request up front from max_completion_tokens alone. Waiting can't fix it;
+// asking for at most `Limit` output tokens does. Returns that limit, or null.
+const OTPM_TOO_LARGE_RE = /Request too large[\s\S]*output tokens per minute \(OTPM\): Limit (\d+)/;
+export function outputLimitFromError(e) {
+  const m = e instanceof Groq.RateLimitError && OTPM_TOO_LARGE_RE.exec(e.message ?? '');
+  return m ? Number(m[1]) : null;
+}
+
 // signal (optional): cancels the run, e.g. when the browser closes the SSE stream.
-export async function investigate(alertId, { onEvent = () => {}, signal } = {}) {
-  const model = process.env.MODEL;
-  if (!model) throw new Error('MODEL env var is not set');
-  const client = new Groq({ maxRetries: 4 }); // reads GROQ_API_KEY; retries 429s honouring Retry-After
+// client (optional): a Groq-compatible client; tests pass a fake one so they spend no tokens.
+export async function investigate(alertId, { onEvent = () => {}, signal, client } = {}) {
+  if (!process.env.MODEL) throw new Error('MODEL env var is not set');
+  // Models to try in order; FALLBACK_MODEL is optional.
+  const models = [...new Set([process.env.MODEL, process.env.FALLBACK_MODEL].filter(Boolean))];
+  let modelIdx = 0;
+  const maxTokens = new Map(); // model -> lowered max_completion_tokens (see outputLimitFromError)
+  const modelsUsed = [models[0]];
+  client ??= new Groq({ maxRetries: 4 }); // reads GROQ_API_KEY; retries 429s honouring Retry-After
 
   const started = Date.now();
   const abort = new AbortController();
@@ -101,10 +125,10 @@ export async function investigate(alertId, { onEvent = () => {}, signal } = {}) 
       let response;
       try {
         response = await client.chat.completions.create(
-          { model, messages: forApi(messages),
+          { model: models[modelIdx], messages: forApi(messages),
             // Last turn: only submit_verdict is offered and a tool call is required.
             tools: lastStep ? SUBMIT_ONLY : API_TOOLS, tool_choice: lastStep ? 'required' : 'auto',
-            max_completion_tokens: MAX_COMPLETION_TOKENS, temperature: 0.2 },
+            max_completion_tokens: maxTokens.get(models[modelIdx]) ?? MAX_COMPLETION_TOKENS, temperature: 0.2 },
           { signal: abort.signal },
         );
       } catch (e) {
@@ -112,6 +136,24 @@ export async function investigate(alertId, { onEvent = () => {}, signal } = {}) 
           malformedRetries++;
           onEvent({ type: 'retry', step, reason: `model output could not be parsed (${e.error?.error?.code ?? e.error?.code})` });
           step--; // the failed sample doesn't count as a step
+          continue;
+        }
+        const limit = outputLimitFromError(e);
+        const current = maxTokens.get(models[modelIdx]) ?? MAX_COMPLETION_TOKENS;
+        if (limit && limit < current) { // lower the cap once per model; if it still fails, give up below
+          maxTokens.set(models[modelIdx], limit);
+          onEvent({ type: 'retry', step, reason: `${models[modelIdx]} allows at most ${limit} output tokens per minute; capping output at ${limit}` });
+          step--;
+          continue;
+        }
+        if (isDailyQuotaError(e)) {
+          if (modelIdx === models.length - 1) {
+            throw new Error(`daily token quota exhausted for ${models.join(' and ')}`, { cause: e });
+          }
+          const from = models[modelIdx++];
+          modelsUsed.push(models[modelIdx]);
+          onEvent({ type: 'model_switch', step, from, to: models[modelIdx], reason: 'daily token quota exhausted' });
+          step--; // the rejected request produced nothing; redo this step on the next model
           continue;
         }
         throw e;
@@ -146,7 +188,7 @@ export async function investigate(alertId, { onEvent = () => {}, signal } = {}) 
         if (check.ok) {
           const verdict = { ...check.verdict, touched: { nodes: [...touchedNodes], edges: [...touchedEdges] } };
           onEvent({ type: 'verdict', step, verdict });
-          return { verdict, trace, usage, steps: step, ms: Date.now() - started };
+          return { verdict, trace, usage, steps: step, ms: Date.now() - started, models: modelsUsed };
         }
         if (verdictRetryUsed) throw new Error(`invalid verdict after retry: ${check.errors.join('; ')}`);
         verdictRetryUsed = true;

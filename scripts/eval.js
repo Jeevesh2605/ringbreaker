@@ -31,6 +31,7 @@ const neverFreeze = new Set([
 function printEvent(e) {
   if (e.type === 'tool') console.log(`   [${e.step}] ${e.tool} ${JSON.stringify(e.args)} -> ${e.summary} (${e.ms}ms)`);
   else if (e.type === 'verdict_rejected') console.log(`   [${e.step}] verdict rejected: ${e.errors.join('; ')}`);
+  else if (e.type === 'model_switch') console.log(`   [${e.step}] model switch: ${e.from} -> ${e.to} (${e.reason})`);
   else if (e.type === 'retry') console.log(`   [${e.step}] retry: ${e.reason}`);
   else if (e.type === 'error') console.log(`   error: ${e.message}`);
 }
@@ -59,12 +60,13 @@ for (const alertId of targets) {
       tool_calls: run.trace.length,
       seconds: Math.round(run.ms / 1000),
       tokens: run.usage,
+      models: run.models,
       evidence: v.evidence,
       ring_members: v.ring_members,
     });
     console.log(`   verdict ${v.verdict} (${v.confidence}) ${row.verdict_ok ? 'OK' : 'WRONG'} | freeze ${frozen.length} ` +
       `P=${row.freeze_precision.toFixed(2)} R=${row.freeze_recall.toFixed(2)} | safe=${row.safe} | ` +
-      `${run.steps} steps, ${run.trace.length} tool calls, ${row.seconds}s`);
+      `${run.steps} steps, ${run.trace.length} tool calls, ${row.seconds}s | ${run.models.join(' -> ')}`);
     v.evidence.forEach((e) => console.log(`     - ${e}`));
   } catch (e) {
     Object.assign(row, { got: 'error', error: e.message, verdict_ok: false, safe: true });
