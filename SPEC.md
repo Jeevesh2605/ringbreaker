@@ -29,9 +29,9 @@ Mule rings launder scam money through chains of ordinary-looking bank accounts. 
 
 ## 3. Hackathon rules checklist
 
-- [ ] FalkorDB is the primary graph DB and powers a core part of the project.
+- [x] FalkorDB is the primary graph DB and powers a core part of the project. (Only datastore; see README "How RingBreaker uses FalkorDB".)
 - [ ] New repo, all main implementation done inside the window (general libraries/templates are fine).
-- [ ] Live deployment link (preferred); otherwise demo video + complete local setup instructions.
+- [x] Live deployment link (preferred); otherwise demo video + complete local setup instructions. (Both: live link + README setup.)
 - [ ] Coding assistant usage is allowed: I must review the code and be able to explain the architecture and security.
 - [ ] Blog post written for the Best Blog prize.
 - [ ] Submit with buffer, not in the last hour.
@@ -295,13 +295,13 @@ Scaffolding rule: do not create everything up front. Day 1 only needs `data/`, `
 
 **Day 3 (Oct 17): Actions, UI, deploy. Goal: full demo flow live.**
 - [x] Action tools, approval flow, `verify_cutoff`.
-- [ ] SSE endpoint; React UI with the graph canvas, trace panel, verdict card, approve button, before/after badge.
-- [ ] Deploy API + UI + FalkorDB; test the live URL end to end.
+- [x] SSE endpoint; React UI with the graph canvas, trace panel, verdict card, approve button, before/after badge.
+- [x] Deploy API + UI + FalkorDB; test the live URL end to end. (Render + FalkorDB Cloud: https://ringbreaker-5o88.onrender.com, demo passcode on costly routes.)
 - [ ] Acceptance: the full demo runs on the deployed link.
 
 **Day 4 (Oct 18): Polish and submit. No new features after noon.**
-- [ ] Fix demo rough edges; reseed endpoint; error states.
-- [ ] README with architecture diagram, local setup, deploy notes, data disclosure, AI-assistant disclosure.
+- [x] Fix demo rough edges; reseed endpoint; error states. (Reset demo button, friendly 401/409/quota/offline/dropped-stream messages.)
+- [x] README with architecture diagram, local setup, deploy notes, data disclosure, AI-assistant disclosure.
 - [ ] Record the 3-minute demo video (section 13).
 - [ ] Write the blog (notes collected during Days 1-3).
 - [ ] Submit by the evening, well before 11:59 PM IST.

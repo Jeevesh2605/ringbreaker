@@ -85,6 +85,107 @@ RETURN count(DISTINCT [n IN nodes(p) | n.id]) AS routes,
 
 It counts distinct routes by which outside money can still reach the ring's terminal (cash-out) accounts without passing through a frozen account. Before the freeze it is greater than 0; after a correct freeze it is 0.
 
+## How RingBreaker uses FalkorDB
+
+FalkorDB is the project's **only datastore**, and the agent's whole investigation runs inside it. Every step the agent takes is a Cypher query. The verdict, the approved freezes and the audit trail are written back into the same graph. The proof of the cut-off is one more graph query. There is no SQL database, cache or side store.
+
+### What lives in the graph
+
+One graph named `ring`: 7,847 nodes and 25,962 edges.
+
+| | Count | Notes |
+|---|---|---|
+| `Account` | 1,911 | ~1,900 ordinary customers + planted rings A/B/C, a merchant and a family |
+| `VPA` / `Device` / `Phone` | 1,911 / 2,115 / 1,903 | Identity nodes: two accounts on one `Device` is a 2-hop pattern |
+| `SENT` edges | 20,007 | **One edge per transaction**, carrying `amount` and `ts` |
+| `USES_DEVICE`, `LINKED_PHONE`, `HAS_VPA` | 2,126 / 1,911 / 1,911 | |
+| `Alert` + `ABOUT` | 7 | The investigation entry points |
+| `Case`, `INCLUDES`, `ACTION` | written at run time | Verdicts, ring roles, and freeze audit edges |
+
+Transactions are modelled as edges, not nodes, on purpose: a money trail of N transfers is then an N-hop path, so FalkorDB's variable-length traversal (`-[:SENT*1..4]->`) answers "where did the money go?" in one query.
+
+### Two ways in: `GRAPH.QUERY` and `GRAPH.RO_QUERY`
+
+All access goes through `server/src/db.js`, which uses the official `falkordb` Node client and exposes exactly two helpers:
+
+```js
+readQuery(cypher, params)   // graph.roQuery(...) -> GRAPH.RO_QUERY, TIMEOUT 5s
+writeQuery(cypher, params)  // graph.query(...)   -> GRAPH.QUERY,    TIMEOUT 30s
+```
+
+- Every agent tool, including the LLM-written free-form Cypher, uses `readQuery`. `GRAPH.RO_QUERY` makes **FalkorDB itself** refuse any query that would write, so the agent's read path cannot mutate the graph even if our keyword guard were bypassed. A test bypasses the guard and confirms FalkorDB still blocks the write.
+- Only the seed script and the approval-gated action tools call `writeQuery`.
+- Both pass FalkorDB's server-side `TIMEOUT`, so a runaway traversal is killed inside the database, not just abandoned by the client.
+- Both always take a params object. Values reach FalkorDB as `$parameters`, never spliced into query text.
+
+### Indexes
+
+At startup (`server/src/schema.js`) we create a range index on each lookup key, `CREATE INDEX FOR (n:Account) ON (n.id)`, and likewise for `Device.id`, `Phone.number`, `VPA.handle`, `Alert.id` and `Case.id`. Every tool starts from an indexed lookup such as `(:Account {id: $account_id})` and traverses outward from there, so a query touches only the neighbourhood it explores, not the whole label.
+
+### Loading the data
+
+`scripts/seed.js` wipes and reloads the graph in batches of 1,000 rows. Each batch is sent as **one parameter** and expanded inside FalkorDB with `UNWIND`:
+
+```cypher
+UNWIND $rows AS r
+MATCH (a:Account {id: r.from}), (d:Device {id: r.to})
+CREATE (a)-[:USES_DEVICE {last_seen: r.last_seen}]->(d)
+```
+
+The full load takes about 0.3 s against local Docker and 3.4 s against FalkorDB Cloud, and the script checks the final counts against the source file.
+
+### The Cypher behind each agent tool
+
+| Tool | Graph pattern | Why it needs a graph |
+|---|---|---|
+| `money_trail` | `(a {id:$id})-[:SENT*1..N]->(x)` with `all(r IN relationships(p) WHERE r.ts >= $since)` | Multi-hop money flow, filtered on **every** edge of the path, in one query |
+| `shared_identity` | `(a)-[:USES_DEVICE\|LINKED_PHONE]->(x)<-[:USES_DEVICE\|LINKED_PHONE]-(b)` | Two accounts linked through a shared device **or** phone: one pattern with a multi-type relationship |
+| `expand_ring` | `UNION ALL` of a money hop and an identity hop from a set `$ids`, ranked by weight | Grows a ring along both kinds of link at once |
+| `fan_stats` | Inbound aggregation, `WITH`, then outbound aggregation | Degree and pass-through ratio without row multiplication |
+| `account_profile` | Chained `OPTIONAL MATCH` + `collect(DISTINCT ...)`, counting how many accounts share each device or phone | Shows in one call whether an identity is shared |
+| `verify_cutoff` | Path query with `none(n IN nodes(p) WHERE n.status = 'frozen')` | Can money still get through? A question about paths, not rows |
+
+For example, `money_trail` returns the distinct transactions on every qualifying path rather than hundreds of near-duplicate paths:
+
+```cypher
+MATCH p = (a:Account {id: $account_id})-[:SENT*1..4]->(x:Account)
+WHERE all(r IN relationships(p) WHERE r.ts >= $since)
+WITH p LIMIT 500
+WITH collect(p) AS paths, count(p) AS path_count
+UNWIND paths AS p
+UNWIND relationships(p) AS r
+WITH DISTINCT path_count, r
+RETURN path_count, startNode(r).id AS from, endNode(r).id AS to, r.txn_id, r.amount, r.ts
+ORDER BY r.ts
+```
+
+From Ring A's victim this returns the complete laundering chain (6 accounts, 20 transactions) out of 232 matching paths.
+
+### Writes, audit and verification inside the graph
+
+- **The approval gate is a single query.** `freeze_account` freezes only if the account is in the case's `proposed_freezes` and still active, and writes the audit edge in the same statement:
+  ```cypher
+  MATCH (c:Case {id: $case_id}), (a:Account {id: $account_id})
+  WHERE $account_id IN c.proposed_freezes AND a.status = 'active'
+  SET a.status = 'frozen'
+  CREATE (c)-[:ACTION {type: 'freeze', ts: $now, approved_by: $approved_by, reason: $reason}]->(a)
+  ```
+- **The audit trail is graph data.** `(Case)-[:INCLUDES {role}]->(Account)` and `(Case)-[:ACTION]->(Account)` sit next to the transactions they explain, so the report and the canvas read them with ordinary traversals.
+- **Verification is a path query** (shown above). It counts **distinct routes**, meaning sequences of account IDs, rather than raw paths. Because every transaction is its own edge, split payments multiply paths: Ring A has 1,488 raw paths but only 13 distinct routes into its cash-out. After the freeze, FalkorDB returns 0.
+- **The canvas reads the graph directly.** `/api/graph/subgraph` fetches exactly the node IDs named in the agent's trace with one indexed `UNION ALL` lookup per label, plus every edge between them, using `startNode()`/`endNode()` to keep direction and `coalesce(b.id, b.number, b.handle)` because each label has its own key.
+
+### FalkorDB specifics we worked with
+
+- **Edge direction and variable-length bounds can't be parameters** in Cypher. `money_trail` therefore pre-builds one query text per (direction, hops) pair from constants at load time, and the caller only picks a key. User input never becomes query text.
+- **Labels can't be parameters either**, so `CREATE INDEX` is built from a fixed constant list. It's the only place query text is assembled. Re-running it is safe: we treat FalkorDB's "already indexed" error as success.
+- **Path predicates** (`all()`, `none()` over `relationships(p)` / `nodes(p)`), multi-type relationships (`A|B`), `UNION ALL`, `startNode()`/`endNode()` and list comprehensions over `nodes(p)` all worked as expected. Each query was tried in the FalkorDB Browser (`localhost:3000`) before being wired into a tool.
+- **Times are epoch-millisecond numbers.** Comparing them to a date string matches nothing. When the agent did that in free-form Cypher it got empty results, so the tool description now states the type explicitly.
+- **FalkorDB Cloud** hosts the production graph. It's the same client and code path as local Docker, configured only by `FALKORDB_HOST/PORT/USERNAME/PASSWORD`. The deployed container can rebuild the demo graph on demand (`POST /api/admin/reseed`).
+
+### Performance
+
+Measured on today's runs, a typical tool query takes **5–30 ms** against local FalkorDB and **230–470 ms** from the Render container to FalkorDB Cloud, mostly network round-trip. Either way, the database is a rounding error next to the LLM: a full investigation takes 1–5 minutes, almost all of it spent waiting on free-tier rate limits.
+
 ## Safety model
 
 The agent reads untrusted data and writes Cypher, so safety lives in code, not in the prompt.
