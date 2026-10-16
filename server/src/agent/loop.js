@@ -52,10 +52,10 @@ function toModelText(res) {
 // Replace the oldest full tool results with their summaries until the prompt fits the
 // budget. The newest result is never trimmed. Trimmed text keeps the summary, so the
 // model still knows what it learned, and the full data stays in the trace.
-function trimContext(messages, summaries) {
+function trimContext(messages, summaries, budget = CONTEXT_BUDGET_TOKENS) {
   const toolMsgs = messages.filter((m) => m.role === 'tool' && !m.trimmed);
   for (const m of toolMsgs.slice(0, -1)) {
-    if (estimateTokens(messages) <= CONTEXT_BUDGET_TOKENS) return;
+    if (estimateTokens(messages) <= budget) return;
     m.content = `[older result trimmed to save context] ${summaries.get(m.tool_call_id)}`;
     m.trimmed = true;
   }
@@ -80,15 +80,18 @@ const MAX_MALFORMED_RETRIES = 2;
 const DAILY_LIMIT_RE = /per day \((TPD|RPD)\)/;
 export const isDailyQuotaError = (e) => e instanceof Groq.RateLimitError && DAILY_LIMIT_RE.test(e.message ?? '');
 
-// "Request too large ... output tokens per minute (OTPM): Limit 1000, Requested 1263": some
-// models (e.g. qwen/qwen3.8-27b) cap output per minute below our max_completion_tokens, and
-// Groq rejects the request up front from max_completion_tokens alone. Waiting can't fix it;
-// asking for at most `Limit` output tokens does. Returns that limit, or null.
-const OTPM_TOO_LARGE_RE = /Request too large[\s\S]*output tokens per minute \(OTPM\): Limit (\d+)/;
-export function outputLimitFromError(e) {
-  const m = e instanceof Groq.RateLimitError && OTPM_TOO_LARGE_RE.exec(e.message ?? '');
-  return m ? Number(m[1]) : null;
+// "Request too large ... per minute": some models (e.g. qwen/qwen3.8-27b) have small per-minute
+// caps, and Groq rejects a single request that is over them outright (429 or 413). Waiting
+// can't fix that; a smaller request can:
+//   OTPM (output): "Limit 1000, Requested 1263" -> ask for at most 1000 output tokens.
+//   ITPM (input):  "Limit 7000, Requested 7617" -> trim the conversation to fit.
+// Returns { kind: 'input' | 'output', limit, requested }, or null.
+const TOO_LARGE_RE = /Request too large[\s\S]*?(input|output) tokens per minute \([IO]TPM\): Limit (\d+), Requested (\d+)/;
+export function tooLargeFromError(e) {
+  const m = e instanceof Groq.APIError && TOO_LARGE_RE.exec(e.message ?? '');
+  return m ? { kind: m[1], limit: Number(m[2]), requested: Number(m[3]) } : null;
 }
+const MAX_INPUT_SHRINKS = 2;
 
 // signal (optional): cancels the run, e.g. when the browser closes the SSE stream.
 // client (optional): a Groq-compatible client; tests pass a fake one so they spend no tokens.
@@ -97,7 +100,9 @@ export async function investigate(alertId, { onEvent = () => {}, signal, client 
   // Models to try in order; FALLBACK_MODEL is optional.
   const models = [...new Set([process.env.MODEL, process.env.FALLBACK_MODEL].filter(Boolean))];
   let modelIdx = 0;
-  const maxTokens = new Map(); // model -> lowered max_completion_tokens (see outputLimitFromError)
+  const maxTokens = new Map(); // model -> lowered max_completion_tokens (see tooLargeFromError)
+  let contextBudget = CONTEXT_BUDGET_TOKENS; // lowered if a model's input cap is smaller
+  let inputShrinks = 0;
   const modelsUsed = [models[0]];
   client ??= new Groq({ maxRetries: 4 }); // reads GROQ_API_KEY; retries 429s honouring Retry-After
 
@@ -120,7 +125,7 @@ export async function investigate(alertId, { onEvent = () => {}, signal, client 
 
   try {
     for (let step = 1; step <= MAX_STEPS; step++) {
-      trimContext(messages, summaries);
+      trimContext(messages, summaries, contextBudget);
       const lastStep = step === MAX_STEPS;
       let response;
       try {
@@ -138,11 +143,20 @@ export async function investigate(alertId, { onEvent = () => {}, signal, client 
           step--; // the failed sample doesn't count as a step
           continue;
         }
-        const limit = outputLimitFromError(e);
+        const tooLarge = tooLargeFromError(e);
         const current = maxTokens.get(models[modelIdx]) ?? MAX_COMPLETION_TOKENS;
-        if (limit && limit < current) { // lower the cap once per model; if it still fails, give up below
-          maxTokens.set(models[modelIdx], limit);
-          onEvent({ type: 'retry', step, reason: `${models[modelIdx]} allows at most ${limit} output tokens per minute; capping output at ${limit}` });
+        if (tooLarge?.kind === 'output' && tooLarge.limit < current) { // once per model; if it still fails, give up
+          maxTokens.set(models[modelIdx], tooLarge.limit);
+          onEvent({ type: 'retry', step, reason: `${models[modelIdx]} allows at most ${tooLarge.limit} output tokens per minute; capping output at ${tooLarge.limit}` });
+          step--;
+          continue;
+        }
+        if (tooLarge?.kind === 'input' && inputShrinks < MAX_INPUT_SHRINKS) {
+          // Our estimate (chars/4) undercounts for some tokenizers: scale the budget by how far
+          // over we were, with a 10% margin, then trim older results to their summaries.
+          inputShrinks++;
+          contextBudget = Math.floor(contextBudget * (tooLarge.limit / tooLarge.requested) * 0.9);
+          onEvent({ type: 'retry', step, reason: `${models[modelIdx]} accepts at most ${tooLarge.limit} input tokens per minute (sent ${tooLarge.requested}); trimming context to ~${contextBudget} estimated tokens` });
           step--;
           continue;
         }

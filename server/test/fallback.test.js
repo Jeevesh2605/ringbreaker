@@ -1,10 +1,13 @@
 // Model fallback in the agent loop, driven by a fake Groq client: no DB, no API, no tokens.
 // The fake fails the primary model with Groq's real daily-quota 429 text and answers the
 // fallback model with an immediate submit_verdict.
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import Groq from 'groq-sdk';
 import { investigate, isDailyQuotaError } from '../src/agent/loop.js';
+import { close } from '../src/db.js';
+
+after(() => close()); // the ITPM test runs a real read tool, which opens a DB connection
 
 const quota429 = (model, unit = 'tokens per day (TPD)') => new Groq.RateLimitError(429,
   { error: { message: `Rate limit reached for model \`${model}\` on ${unit}: Limit 200000, Used 198485, Requested 3864.` } },
@@ -88,4 +91,42 @@ test('after a switch, lowers max_completion_tokens to the fallback model\'s OTPM
 test('gives up if the request is still too large after capping', async () => {
   const client = { chat: { completions: { create: async () => { throw otpm429('primary'); } } } };
   await assert.rejects(investigate('ALT001', { client }), /Request too large/);
+});
+
+// The real 413 Groq returned for qwen/qwen3.8-27b during the Oct 16 eval (ALT003, step 3).
+const itpm413 = (model, requested) => new Groq.APIError(413, { error: { message:
+  `Request too large for model \`${model}\` in organization \`org_x\` service tier \`on_demand\` on input tokens per minute (ITPM): Limit 7000, Requested ${requested}, please reduce your message size and try again.`,
+  type: 'tokens', code: 'rate_limit_exceeded' } }, undefined, new Headers());
+
+// A real read tool call (read-only, local FalkorDB): its result is large, as in a real run.
+const trailTurn = (id) => ({
+  choices: [{ finish_reason: 'tool_calls', message: { content: '', tool_calls: [{ id, type: 'function',
+    function: { name: 'money_trail', arguments: JSON.stringify({ account_id: 'ACC0438', direction: 'forward', max_hops: 4 }) } }] } }],
+  usage: { prompt_tokens: 10, completion_tokens: 5 },
+});
+
+test('input too large (ITPM 413): trims older tool results and redoes the step', async () => {
+  const sent = [];
+  const client = { chat: { completions: { create: async (body) => {
+    sent.push(JSON.stringify(body.messages));
+    const n = sent.length;
+    if (n <= 3) return trailTurn(`c${n}`);       // steps 1-3 call money_trail, growing the context
+    if (n === 4) throw itpm413('primary', 7617);  // step 4 is rejected as too large
+    return submit;                                // the retried step 4 submits
+  } } } };
+  const events = [];
+  const run = await investigate('ALT001', { client, onEvent: (e) => events.push(e) });
+  assert.equal(run.verdict.verdict, 'benign');
+  assert.equal(run.steps, 4); // the rejected request does not use up a step
+  assert.ok(events.some((e) => e.type === 'retry' && /input tokens per minute/.test(e.reason)));
+  const trimmed = (m) => (m.match(/older result trimmed/g) ?? []).length;
+  assert.ok(trimmed(sent[4]) > trimmed(sent[3]), 'the retry trims more older results');
+  assert.ok(sent[4].length < sent[3].length, 'the retried request is smaller');
+});
+
+test('tooLargeFromError reads both input and output variants', async () => {
+  const { tooLargeFromError } = await import('../src/agent/loop.js');
+  assert.deepEqual(tooLargeFromError(itpm413('m', 7617)), { kind: 'input', limit: 7000, requested: 7617 });
+  assert.deepEqual(tooLargeFromError(otpm429('m')), { kind: 'output', limit: 1000, requested: 1263 });
+  assert.equal(tooLargeFromError(quota429('m')), null);
 });
