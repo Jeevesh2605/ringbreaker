@@ -130,3 +130,32 @@ test('tooLargeFromError reads both input and output variants', async () => {
   assert.deepEqual(tooLargeFromError(otpm429('m')), { kind: 'output', limit: 1000, requested: 1263 });
   assert.equal(tooLargeFromError(quota429('m')), null);
 });
+
+// Oct 17, live: the fallback model's submit_verdict was cut off at its 1,000-token output cap,
+// and Groq answered 400 tool_use_failed. The retry must not resend the identical request.
+const toolUseFailed = () => new Groq.BadRequestError(400, { error: { code: 'tool_use_failed',
+  message: 'Failed to call a function.', failed_generation: '<tool_call>\n<function=submit_verdict>\n<parameter=evidence>\n["ACC' } },
+  undefined, new Headers());
+
+test('tool_use_failed: retries with a "shorter arguments" hint, then finishes', async () => {
+  const bodies = [];
+  let n = 0;
+  const client = { chat: { completions: { create: async (body) => {
+    bodies.push(structuredClone(body.messages));
+    if (n++ === 0) throw toolUseFailed();
+    return submit;
+  } } } };
+  const events = [];
+  const run = await investigate('ALT001', { client, onEvent: (e) => events.push(e) });
+  assert.equal(run.verdict.verdict, 'benign');
+  assert.equal(run.steps, 1, 'the failed sample does not count as a step');
+  assert.ok(events.some((e) => e.type === 'retry' && /could not be parsed/.test(e.reason)));
+  const hint = (msgs) => msgs.some((m) => m.role === 'user' && /SHORTER arguments/.test(m.content));
+  assert.equal(hint(bodies[0]), false);
+  assert.equal(hint(bodies[1]), true, 'the retry asks for shorter arguments');
+});
+
+test('tool_use_failed: gives up after 2 retries with the error', async () => {
+  const client = { chat: { completions: { create: async () => { throw toolUseFailed(); } } } };
+  await assert.rejects(investigate('ALT001', { client }), /Failed to call a function/);
+});

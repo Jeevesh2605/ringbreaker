@@ -73,6 +73,12 @@ const MALFORMED_CODES = ['tool_use_failed', 'output_parse_failed'];
 const isMalformedOutput = (e) => e instanceof Groq.BadRequestError &&
   MALFORMED_CODES.includes(e.error?.error?.code ?? e.error?.code);
 const MAX_MALFORMED_RETRIES = 2;
+// Re-sampling the identical request tends to fail the identical way. The common cause on the
+// free tier: a long submit_verdict is cut off by a low output cap (the fallback model's OTPM
+// limit is 1,000 tokens), so Groq receives half a tool call. Seen on Oct 17: a 7-bullet
+// verdict ended mid-word. So the first retry also tells the model to send shorter arguments.
+const MALFORMED_HINT = 'Your last tool call could not be parsed: it was probably cut off by the output-token limit. ' +
+  'Call the tool again with SHORTER arguments: at most 5 evidence bullets of one short sentence each, and a reason of at most 8 words per action.';
 
 // Daily quota exhausted: 429 whose message names a per-day limit, e.g. "Rate limit reached for
 // model `openai/gpt-oss-120b` ... on tokens per day (TPD): Limit 200000 ...". Waiting won't
@@ -139,7 +145,8 @@ export async function investigate(alertId, { onEvent = () => {}, signal, client 
       } catch (e) {
         if (isMalformedOutput(e) && malformedRetries < MAX_MALFORMED_RETRIES) {
           malformedRetries++;
-          onEvent({ type: 'retry', step, reason: `model output could not be parsed (${e.error?.error?.code ?? e.error?.code})` });
+          onEvent({ type: 'retry', step, reason: `model output could not be parsed (${e.error?.error?.code ?? e.error?.code}); asking for shorter arguments` });
+          if (malformedRetries === 1) messages.push({ role: 'user', content: MALFORMED_HINT });
           step--; // the failed sample doesn't count as a step
           continue;
         }
