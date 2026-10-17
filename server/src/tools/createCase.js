@@ -34,3 +34,24 @@ export async function createCase({ alert_id, verdict }) {
     edges: verdict.ring_members.map((m) => `${id}>INCLUDES>${m.account_id}`),
   };
 }
+
+// close_case(case_id, cut): ACTION tool (writes). Called by the approval API right after the
+// post-freeze verify_cutoff, never by the model. It records the case's outcome so the alert
+// queue can show it:
+//   cut = true  -> status 'closed'        (no route left AND no leak: the cut-off is proven)
+//   cut = false -> status 'needs_review'  (accounts were frozen but routes or leaks remain)
+const CLOSE_CYPHER = `
+MATCH (c:Case {id: $case_id})
+SET c.status = $status, c.closed_at = $now
+RETURN c.id AS id, c.status AS status`;
+
+export async function closeCase({ case_id, cut }) {
+  if (typeof case_id !== 'string') throw new Error('case_id is required');
+  const params = { case_id, status: cut === true ? 'closed' : 'needs_review', now: Date.now() };
+  const rows = await writeQuery(CLOSE_CYPHER, params);
+  return {
+    cypher: CLOSE_CYPHER, params, data: { case_id, status: rows[0]?.status ?? null },
+    summary: rows.length ? `${case_id} marked ${params.status}` : `${case_id} not found`,
+    nodes: rows.length ? [case_id] : [], edges: [],
+  };
+}

@@ -9,6 +9,16 @@ process.env.FALKORDB_GRAPH = 'ring_test';
 const ROOT = new URL('../../', import.meta.url).pathname;
 const { actions } = await import('../src/tools/index.js');
 const { readQuery, getGraph, close } = await import('../src/db.js');
+const { alertsRouter, alertStatus } = await import('../src/routes/alerts.js');
+const express = (await import('express')).default;
+
+// GET /api/alerts through the real router, on the test graph.
+async function getAlerts() {
+  const app = express().use('/api', alertsRouter);
+  const server = app.listen(0);
+  try { return await (await fetch(`http://127.0.0.1:${server.address().port}/api/alerts`)).json(); }
+  finally { server.close(); }
+}
 const gt = JSON.parse(readFileSync(`${ROOT}data/ground_truth.json`, 'utf8'));
 const A = gt.rings.A;
 
@@ -22,6 +32,13 @@ let caseId;
 
 before(() => execFileSync('node', ['scripts/seed.js'], { cwd: ROOT, env: { ...process.env, FALKORDB_GRAPH: 'ring_test' } }));
 after(async () => { await (await getGraph()).delete(); await close(); });
+
+test('alerts start open; a confirmed ring awaits approval', async () => {
+  assert.ok((await getAlerts()).every((a) => a.status === 'open'));
+  assert.equal(alertStatus({ case_id: 'C', case_verdict: 'ring_confirmed' }), 'awaiting_approval');
+  assert.equal(alertStatus({ case_id: 'C', case_verdict: 'suspicious' }), 'monitoring');
+  assert.equal(alertStatus({ case_id: 'C', case_verdict: 'benign' }), 'dismissed');
+});
 
 test('create_case links every member with its role', async () => {
   const r = await actions.create_case({ alert_id: 'ALT001', verdict });
@@ -59,6 +76,13 @@ test('approved freezes cut every route, with an audit edge each', async () => {
   assert.equal(r.data.leaks, 0, 'the complete ring sends no money to an active outside account');
   assert.equal(r.data.cut, true);
   console.log('   after: ', r.summary);
+  // Approval route's last step: record the outcome. The alert then reads as closed.
+  const closed = await actions.close_case({ case_id: caseId, cut: r.data.cut });
+  assert.equal(closed.data.status, 'closed');
+  const alert = (await getAlerts()).find((x) => x.id === 'ALT001');
+  assert.equal(alert.status, 'closed');
+  assert.equal(alert.case_id, caseId);
+  assert.equal(alert.account_status, 'active', 'the alerted account is the victim: it is never frozen');
   const [audit] = await readQuery('MATCH (:Case {id:$id})-[x:ACTION]->() RETURN count(x) AS n, collect(DISTINCT x.approved_by) AS by', { id: caseId });
   assert.equal(audit.n, A.freeze.length);
   assert.deepEqual(audit.by, ['tester']);
@@ -83,5 +107,7 @@ test('leak check: an incomplete case is not reported as cut off', async () => {
   assert.deepEqual(r.data.leak_accounts, ['ACC1901']);
   assert.ok(r.data.leaked_amount > 0);
   assert.equal(r.data.cut, false, r.summary);
+  await actions.close_case({ case_id: id, cut: r.data.cut });
+  assert.equal((await getAlerts()).find((x) => x.id === 'ALT001').status, 'needs_review', 'the newest case wins');
   console.log('   partial:', r.summary);
 });

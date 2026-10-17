@@ -94,14 +94,15 @@ export const tools = {
 
 // ACTION tools (Day 3). Deliberately NOT part of `tools` above: the agent loop only offers
 // `tools` to the model, so the model can never call these. They run from the API
-// (create_case after an investigation; freeze + verify after human approval).
-import { createCase } from './createCase.js';
+// (create_case after an investigation; freeze + verify + close_case after human approval).
+import { createCase, closeCase } from './createCase.js';
 import { freezeAccount } from './freezeAccount.js';
 import { verifyCutoff } from './verifyCutoff.js';
 import { generateReport } from './generateReport.js';
 
 export const actions = {
   create_case: createCase,
+  close_case: closeCase,
   freeze_account: freezeAccount,
   verify_cutoff: verifyCutoff,
   generate_report: generateReport,

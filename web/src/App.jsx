@@ -158,6 +158,7 @@ export default function App() {
       if (e.name !== 'AbortError') setEvents((ev) => [...ev, { type: 'error', message: explain(e) }]);
     } finally {
       setRunning(false);
+      loadAlerts(); // a finished run created a Case: the alert's status changes
     }
   }
 

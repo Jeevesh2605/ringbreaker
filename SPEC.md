@@ -90,7 +90,7 @@ const res = await graph.query('MATCH (a:Account {id:$id}) RETURN a', { params: {
 | `Device` | `id` (fingerprint), `os` |
 | `Phone` | `number` (masked/fake) |
 | `Alert` | `id`, `type` (`victim_complaint` / `velocity` / `fan_in`), `created_at`, `summary` |
-| `Case` | `id`, `created_at`, `verdict`, `confidence` (created by the agent) |
+| `Case` | `id`, `alert_id`, `created_at`, `verdict`, `confidence`, `proposed_freezes` (created by the agent); `status` (`closed` / `needs_review`) and `closed_at`, set after an approved freeze by `close_case` from the verify result |
 
 **Relationships**
 | Edge | Meaning |
@@ -171,6 +171,7 @@ Cypher syntax caveat: FalkorDB supports most of openCypher but not all of it. Te
 |---|---|
 | `freeze_account(account_id, reason)` | Sets `status='frozen'`, writes `(Case)-[:ACTION]->(Account)`. **Requires approval** (see below). |
 | `create_case(verdict, members)` | Creates the `Case` node and `INCLUDES` edges. |
+| `close_case(case_id, cut)` | After the approved freezes and the post-freeze verify: `status='closed'` if the cut-off is proven (routes 0, no leak), else `needs_review`. The alert queue derives each alert's status (open / awaiting approval / closed / needs review / monitoring / dismissed) from its latest Case. Added Oct 17. |
 | `generate_report(case_id)` | Builds a markdown report: timeline, accounts, evidence, actions. Model-written, graph-grounded. |
 | `verify_cutoff(case_id)` | Re-queries for remaining active-path money flow (below). |
 

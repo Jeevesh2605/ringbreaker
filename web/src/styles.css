@@ -72,8 +72,12 @@ main { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px 1fr 4
 .alert.sel { border-color: var(--accent); background: rgba(76,141,255,.1); box-shadow: 0 0 0 1px var(--accent) inset; }
 .alert .summary { font-size: 12px; color: #c9cedb; }
 .alert .meta { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--muted); }
-.status { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border-radius: 4px; background: rgba(72,184,107,.12); color: var(--ok); }
-.status.frozen { background: rgba(229,72,77,.15); color: #ff8a8d; }
+.status { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border-radius: 4px; background: rgba(76,141,255,.14); color: #9ec0ff; }
+.status.closed { background: rgba(72,184,107,.15); color: var(--ok); }
+.status.awaiting_approval, .status.needs_review { background: rgba(242,168,59,.16); color: var(--warn); }
+.status.monitoring { background: rgba(162,116,232,.18); color: #d3bcf7; }
+.status.dismissed { background: var(--border); color: var(--muted); }
+.acct-frozen { margin-left: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #ff8a8d; }
 .tag { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--border); }
 .tag.victim_complaint { background: rgba(229,72,77,.18); color: #ffb3b5; }
 .tag.fan_in { background: rgba(162,116,232,.22); color: #d3bcf7; }

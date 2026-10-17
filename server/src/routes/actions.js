@@ -6,6 +6,8 @@
 //   3. verify_cutoff after: the before/after numbers are the demo's proof. `cut` is true only
 //      if no route remains AND no ring money sits in an active account outside the case
 //      (the leak check in verifyCutoff.js).
+//   4. close_case records the outcome on the Case: 'closed' if cut, else 'needs_review'.
+//      The alert queue derives each alert's status from its latest Case (routes/alerts.js).
 // No auth (non-goal in SPEC 2): approvedBy is a name typed in the UI, stored on every
 // audit edge.
 import { Router } from 'express';
@@ -30,9 +32,15 @@ actionsRouter.post('/actions/approve', requirePasscode, async (req, res, next) =
       results.push({ account_id, frozen: r.data.frozen, summary: r.summary });
     }
     const after = await actions.verify_cutoff({ case_id: caseId });
+    // Only record an outcome if something was actually frozen by this approval; a request whose
+    // freezes were all refused (unknown case, already frozen) must not close anything.
+    const closed = results.some((r) => r.frozen)
+      ? await actions.close_case({ case_id: caseId, cut: after.data.cut === true })
+      : null;
     res.json({
       caseId,
       results,
+      case_status: closed?.data.status ?? null,
       verify: {
         before: before.data.routes, after: after.data.routes,
         before_summary: before.summary, after_summary: after.summary,
