@@ -85,6 +85,17 @@ RETURN count(DISTINCT [n IN nodes(p) | n.id]) AS routes,
 
 It counts distinct routes by which outside money can still reach the ring's terminal (cash-out) accounts without passing through a frozen account. Before the freeze it is greater than 0; after a correct freeze it is 0.
 
+On its own, that number can be circular. Every route it counts passes through a case member, so freezing everything the case proposed always gives 0, even if the agent missed part of the ring. That is why verify also runs a **leak check**:
+
+```cypher
+MATCH (r:Account)-[s:SENT]->(x:Account)
+WHERE r.id IN $ring AND NOT x.id IN $members AND x.status = 'active'
+RETURN count(DISTINCT x) AS leaks, sum(s.amount) AS leaked_amount,
+       collect(DISTINCT x.id)[0..5] AS leak_accounts
+```
+
+It asks whether ring money has already gone to an active account the case never named. The cut-off counts as verified only when **both** numbers are 0. We hit this in a real run: the agent stopped at the collector (ACC1900) and missed the cash-out (ACC1901), which still held ₹65,202. Routes went 11 → 0, and the leak check flagged ACC1901. The UI then shows "Routes cut, but money leaked" instead of a false pass, and `server/test/actions.test.js` reproduces the case. Limitation: the leak check only looks downstream. A missed mule *upstream* of the case is not flagged.
+
 ## How RingBreaker uses FalkorDB
 
 FalkorDB is the project's **only datastore**, and the agent's whole investigation runs inside it. Every step the agent takes is a Cypher query. The verdict, the approved freezes and the audit trail are written back into the same graph. The proof of the cut-off is one more graph query. There is no SQL database, cache or side store.

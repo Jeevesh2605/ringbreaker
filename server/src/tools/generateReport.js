@@ -64,7 +64,10 @@ export async function generateReport({ case_id }) {
     '',
     verify.data.routes === null
       ? '- Not applicable (no ring accounts in this case).'
-      : `- **${verify.data.routes}** active money route(s) remain from ${verify.data.sources} outside source(s) into ${verify.data.terminals.join(', ')}.`,
+      : [`- **${verify.data.routes}** active money route(s) remain from ${verify.data.sources} outside source(s) into ${verify.data.terminals.join(', ')}.`,
+        verify.data.leaks
+          ? `- **Leak:** ${verify.data.leaks} active account(s) outside this case received ${verify.data.leaked_amount} from the ring: ${verify.data.leak_accounts.join(', ')}. Review before closing.`
+          : '- Leak check: no ring money went to an active account outside this case.'].join('\n'),
   ].join('\n');
 
   return {

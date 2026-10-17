@@ -184,6 +184,8 @@ RETURN count(p) AS remaining_paths
 ```
 Before the freeze this returns > 0. After freezing the ring members it should return 0. Show both numbers on screen. (If `all()` over `nodes(p)` is unsupported, filter on frozen nodes another way, e.g. `none(n IN nodes(p) WHERE n.status = 'frozen')`.)
 
+**Leak check (added Oct 17).** The route count is circular when every proposed account is frozen: it always reads 0, even if the agent missed ring members. The final-test run showed this (the cash-out ACC1901 was missed and kept ₹65,202 while routes went 11 → 0). `verify_cutoff` therefore also counts active accounts outside the case that received money from the ring's non-victim members. A cut-off is verified (`cut: true`) only if routes = 0 **and** leaks = 0. It looks downstream only; a missed upstream mule is not flagged.
+
 ### 8.5 Explainability trace
 Every tool call emits an SSE event:
 ```json

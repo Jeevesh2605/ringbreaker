@@ -56,8 +56,32 @@ test('approved freezes cut every route, with an audit edge each', async () => {
   assert.equal(again.data.frozen, false, 'second freeze is a no-op');
   const r = await actions.verify_cutoff({ case_id: caseId });
   assert.equal(r.data.routes, 0, r.summary);
+  assert.equal(r.data.leaks, 0, 'the complete ring sends no money to an active outside account');
+  assert.equal(r.data.cut, true);
   console.log('   after: ', r.summary);
   const [audit] = await readQuery('MATCH (:Case {id:$id})-[x:ACTION]->() RETURN count(x) AS n, collect(DISTINCT x.approved_by) AS by', { id: caseId });
   assert.equal(audit.n, A.freeze.length);
   assert.deepEqual(audit.by, ['tester']);
+});
+
+// The case the live final test produced: the agent stopped at collector ACC1900 and missed
+// first-layer mules ACC1895/ACC1896 and cash-out ACC1901. Freezing what it proposed gives 0
+// routes (every counted route passes through a frozen member), so routes alone would "prove"
+// a cut-off. The leak check must catch the Rs 65,202 sitting in the still-active ACC1901.
+test('leak check: an incomplete case is not reported as cut off', async () => {
+  const partial = ['ACC1897', 'ACC1898', 'ACC1899', 'ACC1900'];
+  const members = A.members.filter((m) => m.account_id === 'ACC0438' || partial.includes(m.account_id)); // alerted victim + what the agent named
+  // Fresh graph state for this test: unfreeze the ring the previous test froze.
+  await (await getGraph()).query("MATCH (a:Account) WHERE a.status = 'frozen' SET a.status = 'active'");
+  const c = await actions.create_case({ alert_id: 'ALT001', verdict: {
+    ...verdict, ring_members: members,
+    recommended_actions: partial.map((id) => ({ tool: 'freeze_account', account_id: id, reason: 'mule' })) } });
+  const id = c.data.case_id;
+  for (const acc of partial) await actions.freeze_account({ case_id: id, account_id: acc, approved_by: 'tester' });
+  const r = await actions.verify_cutoff({ case_id: id });
+  assert.equal(r.data.routes, 0, 'routes alone look cut off');
+  assert.deepEqual(r.data.leak_accounts, ['ACC1901']);
+  assert.ok(r.data.leaked_amount > 0);
+  assert.equal(r.data.cut, false, r.summary);
+  console.log('   partial:', r.summary);
 });

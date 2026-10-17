@@ -3,7 +3,9 @@
 //   1. verify_cutoff before (how many money routes are open now)
 //   2. freeze_account for each approved id. freeze_account itself refuses ids the case
 //      did not propose, so the client can't approve something the agent never proposed.
-//   3. verify_cutoff after: the before/after numbers are the demo's proof.
+//   3. verify_cutoff after: the before/after numbers are the demo's proof. `cut` is true only
+//      if no route remains AND no ring money sits in an active account outside the case
+//      (the leak check in verifyCutoff.js).
 // No auth (non-goal in SPEC 2): approvedBy is a name typed in the UI, stored on every
 // audit edge.
 import { Router } from 'express';
@@ -35,6 +37,8 @@ actionsRouter.post('/actions/approve', requirePasscode, async (req, res, next) =
         before: before.data.routes, after: after.data.routes,
         before_summary: before.summary, after_summary: after.summary,
         cypher: after.cypher, remaining_sample: after.data.sample_routes ?? [],
+        leaks: after.data.leaks ?? 0, leaked_amount: after.data.leaked_amount ?? 0,
+        leak_accounts: after.data.leak_accounts ?? [], cut: after.data.cut ?? false,
       },
     });
   } catch (e) { next(e); }

@@ -17,7 +17,7 @@ const STAGES = ['Investigate', 'Verdict', 'Approve', 'Verify'];
 
 // The demo's story in four steps. stage: 0 idle, 1 investigating, 3 verdict in / awaiting
 // approval, 4 verified (there is no separate "2": the verdict arrives as the run ends).
-function Stepper({ stage, failed }) {
+function Stepper({ stage, failed, leaked }) {
   return (
     <ol className="stepper">
       {STAGES.map((label, i) => {
@@ -26,8 +26,9 @@ function Stepper({ stage, failed }) {
         // moment the approve response carries its before/after counts.
         const done = n <= 2 ? stage >= 3 : n === 3 ? stage === 4 : stage === 4;
         const active = (n === 1 && stage === 1) || (n === 3 && stage === 3);
-        const state = failed && n === 1 ? 'failed' : done ? 'done' : active ? 'active' : '';
-        return <li key={label} className={state}><span className="dot">{state === 'done' ? '✓' : n}</span>{label}</li>;
+        // Verify with a leak (ring money in an active account outside the case) is a warning, not a pass.
+        const state = failed && n === 1 ? 'failed' : n === 4 && done && leaked ? 'warn' : done ? 'done' : active ? 'active' : '';
+        return <li key={label} className={state}><span className="dot">{state === 'done' ? '✓' : state === 'warn' ? '!' : n}</span>{label}</li>;
       })}
     </ol>
   );
@@ -164,7 +165,10 @@ export default function App() {
     try {
       const r = await api.approve(result.caseId, accountIds, approvedBy);
       setApproval(r);
-      await addToGraph([]); // refresh statuses: frozen accounts turn red
+      // Refresh statuses (frozen accounts turn red) and draw any leak account the case missed.
+      const leak = r.verify?.leak_accounts ?? [];
+      await addToGraph(leak);
+      if (leak.length) { setLatest(new Set(leak)); setTouched((t) => new Set([...t, ...leak])); } // make the leak glow
       loadAlerts();
     } catch (e) {
       setApproval({ error: explain(e) });
@@ -180,6 +184,7 @@ export default function App() {
   // Where the case is in the investigate -> act -> verify loop, for the stepper and the canvas HUD.
   const failed = !running && !result && events.some((e) => e.type === 'error');
   const stage = approval?.verify ? 4 : result ? 3 : running ? 1 : 0;
+  const leaked = Boolean(approval?.verify && !(approval.verify.cut ?? approval.verify.after === 0));
   const lastTool = [...events].reverse().find((e) => e.type === 'tool');
   const hud = running ? { live: true, text: lastTool ? `Step ${lastTool.step} · ${lastTool.tool}` : 'Reading the alert…' }
     : result ? { text: `${VERDICT_TEXT[result.verdict.verdict] ?? result.verdict.verdict} · ${roles.size} account(s)`, verdict: result.verdict.verdict }
@@ -200,7 +205,7 @@ export default function App() {
             <span className="tagline">Investigate a UPI mule ring · freeze with approval · prove the cut-off</span>
           </div>
         </div>
-        <Stepper stage={stage} failed={failed} />
+        <Stepper stage={stage} failed={failed} leaked={leaked} />
         <span className="pill">Synthetic data</span>
         <div className="controls">
           {passRequired && (passOk ? <span className="ok-text">Passcode accepted</span> : (
