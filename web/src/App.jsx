@@ -12,6 +12,26 @@ import VerdictCard from './components/VerdictCard.jsx';
 import * as api from './lib/api.js';
 
 const MAX_IDS = 400; // the subgraph endpoint's limit
+const VERDICT_TEXT = { ring_confirmed: 'Ring confirmed', suspicious: 'Suspicious', benign: 'Benign' };
+const STAGES = ['Investigate', 'Verdict', 'Approve', 'Verify'];
+
+// The demo's story in four steps. stage: 0 idle, 1 investigating, 3 verdict in / awaiting
+// approval, 4 verified (there is no separate "2": the verdict arrives as the run ends).
+function Stepper({ stage, failed }) {
+  return (
+    <ol className="stepper">
+      {STAGES.map((label, i) => {
+        const n = i + 1;
+        // Investigate + Verdict finish together (the verdict ends the run); Verify is done the
+        // moment the approve response carries its before/after counts.
+        const done = n <= 2 ? stage >= 3 : n === 3 ? stage === 4 : stage === 4;
+        const active = (n === 1 && stage === 1) || (n === 3 && stage === 3);
+        const state = failed && n === 1 ? 'failed' : done ? 'done' : active ? 'active' : '';
+        return <li key={label} className={state}><span className="dot">{state === 'done' ? '✓' : n}</span>{label}</li>;
+      })}
+    </ol>
+  );
+}
 const PASS_KEY = 'ringbreaker.passcode';
 
 // Browser storage can throw (private mode, blocked site data): it is only a convenience.
@@ -36,7 +56,7 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [result, setResult] = useState(null); // {verdict, caseId}
+  const [result, setResult] = useState(null); // {verdict, caseId, meta: {steps, usage, ms, models}}
   const [approval, setApproval] = useState(null);
   const [report, setReport] = useState(null);
   const [graph, setGraph] = useState({ nodes: [], links: [] });
@@ -129,7 +149,7 @@ export default function App() {
           setTouched((t) => new Set([...t, ...ids, a.id]));
           if (e.nodes?.length) chain = chain.then(() => addToGraph(e.nodes)).catch(() => {});
         } else if (e.type === 'verdict') {
-          setResult({ verdict: e.verdict, caseId: e.caseId });
+          setResult({ verdict: e.verdict, caseId: e.caseId, meta: { steps: e.steps, usage: e.usage, ms: e.ms, models: e.models } });
           setLatest(new Set());
         }
       }, abort.current.signal);
@@ -157,11 +177,31 @@ export default function App() {
 
   const roles = new Map((result?.verdict.ring_members ?? []).map((m) => [m.account_id, m.role]));
 
+  // Where the case is in the investigate -> act -> verify loop, for the stepper and the canvas HUD.
+  const failed = !running && !result && events.some((e) => e.type === 'error');
+  const stage = approval?.verify ? 4 : result ? 3 : running ? 1 : 0;
+  const lastTool = [...events].reverse().find((e) => e.type === 'tool');
+  const hud = running ? { live: true, text: lastTool ? `Step ${lastTool.step} · ${lastTool.tool}` : 'Reading the alert…' }
+    : result ? { text: `${VERDICT_TEXT[result.verdict.verdict] ?? result.verdict.verdict} · ${roles.size} account(s)`, verdict: result.verdict.verdict }
+    : failed ? { text: 'Run stopped', verdict: 'error' } : null;
+
   return (
     <div className="app">
       <header>
-        <h1>RingBreaker</h1>
-        <span className="muted">Investigate a UPI mule ring, freeze it with approval, prove the cut-off. Synthetic data.</span>
+        <div className="brand">
+          {/* Logo: a ring of nodes with one link cut. */}
+          <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
+            <path d="M16 4a12 12 0 1 1-10.4 6" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
+            <circle cx="16" cy="4" r="3" fill="var(--accent)" /><circle cx="27" cy="20" r="3" fill="var(--accent)" />
+            <circle cx="8" cy="26" r="3" fill="var(--accent)" /><circle cx="5.6" cy="10" r="3" fill="var(--danger)" />
+          </svg>
+          <div>
+            <h1>RingBreaker</h1>
+            <span className="tagline">Investigate a UPI mule ring · freeze with approval · prove the cut-off</span>
+          </div>
+        </div>
+        <Stepper stage={stage} failed={failed} />
+        <span className="pill">Synthetic data</span>
         <div className="controls">
           {passRequired && (passOk ? <span className="ok-text">Passcode accepted</span> : (
             <form onSubmit={(e) => { e.preventDefault(); unlock(); }}>
@@ -175,11 +215,10 @@ export default function App() {
       {notice && <div className="notice" onClick={() => setNotice(null)}>{notice}</div>}
       <main>
         <AlertQueue alerts={alerts} selected={alert?.id} busy={running} onPick={pick} error={alertsError} onRetry={loadAlerts} />
-        <GraphCanvas graph={graph} latest={latest} touched={touched} roles={roles} />
+        <GraphCanvas graph={graph} latest={latest} touched={touched} roles={roles} hud={hud} />
         <aside className="pane right">
-          {running && <button className="secondary" onClick={() => abort.current?.abort()}>Stop run</button>}
-          <TracePanel events={events} running={running} elapsed={elapsed} />
-          {result && <VerdictCard verdict={result.verdict} caseId={result.caseId} approval={approval} onApprove={doApprove} onReport={showReport} />}
+          <TracePanel events={events} running={running} elapsed={elapsed} onStop={() => abort.current?.abort()} />
+          {result && <VerdictCard verdict={result.verdict} caseId={result.caseId} meta={result.meta} approval={approval} onApprove={doApprove} onReport={showReport} />}
         </aside>
       </main>
       {report && (

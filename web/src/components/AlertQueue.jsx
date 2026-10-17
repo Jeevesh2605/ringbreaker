@@ -5,15 +5,15 @@ const TYPE_LABEL = { victim_complaint: 'Victim complaint', velocity: 'Velocity',
 export default function AlertQueue({ alerts, selected, busy, onPick, error, onRetry }) {
   return (
     <aside className="pane alerts">
-      <h2>Alerts</h2>
+      <div className="pane-head"><h2>Alerts {alerts.length > 0 && <span className="count">{alerts.length}</span>}</h2></div>
       {error && <p className="err">{error} <button className="link" onClick={onRetry}>Retry</button></p>}
       <ul>
         {alerts.map((a) => (
           <li key={a.id}>
-            <button className={a.id === selected ? 'alert sel' : 'alert'} disabled={busy} onClick={() => onPick(a)}>
+            <button className={`alert ${a.type}${a.id === selected ? ' sel' : ''}`} disabled={busy} onClick={() => onPick(a)}>
               <span className="row"><b>{a.id}</b><span className={`tag ${a.type}`}>{TYPE_LABEL[a.type] ?? a.type}</span></span>
               <span className="summary">{a.summary}</span>
-              <span className="meta">{a.account_id} · {a.account_status}</span>
+              <span className="meta"><code>{a.account_id}</code><span className={`status ${a.account_status}`}>{a.account_status}</span></span>
             </button>
           </li>
         ))}

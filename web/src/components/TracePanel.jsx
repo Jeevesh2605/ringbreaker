@@ -23,10 +23,15 @@ function Step({ e }) {
   );
 }
 
-export default function TracePanel({ events, running, elapsed }) {
+export default function TracePanel({ events, running, elapsed, onStop }) {
+  const steps = events.filter((e) => e.type === 'tool').length;
   return (
     <section className="trace">
-      <h2>Agent trace {running && <span className="live">running · {elapsed}s</span>}</h2>
+      <div className="pane-head">
+        <h2>Agent trace {steps > 0 && <span className="count">{steps}</span>}</h2>
+        {running && <span className="live"><span className="pulse" />running · {elapsed}s</span>}
+        {running && <button className="secondary tiny" onClick={onStop}>Stop</button>}
+      </div>
       {!events.length && !running && <p className="muted">The agent's tool calls will stream in here.</p>}
       <ol>
         {events.map((e, i) =>

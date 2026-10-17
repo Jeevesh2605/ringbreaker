@@ -7,6 +7,7 @@
 //   latest  Set of node/edge ids touched by the most recent tool call: these glow.
 //   touched Set of every node/edge id the agent has touched in this run.
 //   roles   Map account_id -> role, filled once the verdict arrives.
+//   hud     {text, live?, verdict?} status line drawn over the canvas (current step / verdict).
 import { useEffect, useRef, useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 
@@ -15,12 +16,15 @@ const COLORS = {
   Alert: '#f2a83b', Case: '#48b86b', frozen: '#e5484d',
 };
 const RADIUS = { Account: 5, Alert: 6, Case: 6, Device: 4, Phone: 4, VPA: 3 };
+// Ring members get an outline in their role's color (victims light, mules red), so the
+// layering structure reads at a glance once the verdict lands.
+const ROLE_COLORS = { victim: '#e4e7ee', layer: '#ff8a8d', collector: '#ff5c7a', cashout: '#ff3b3b' };
 
 const fill = (n) => (n.label === 'Account' && n.props?.status === 'frozen' ? COLORS.frozen : COLORS[n.label] ?? '#999');
 // react-force-graph replaces link.source/target with the node objects after the first tick.
 const endId = (end) => (typeof end === 'object' ? end.id : end);
 
-export default function GraphCanvas({ graph, latest, touched, roles }) {
+export default function GraphCanvas({ graph, latest, touched, roles, hud }) {
   const wrap = useRef(null);
   const fg = useRef(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -43,11 +47,31 @@ export default function GraphCanvas({ graph, latest, touched, roles }) {
   // Read the theme's text color once per render, not once per node per frame.
   const labelColor = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#ddd';
 
+  const sent = graph.links.filter((l) => l.type === 'SENT').length;
+
   return (
     <div className="canvas" ref={wrap}>
-      {!graph.nodes.length && <div className="empty">Pick an alert to see the graph.</div>}
+      {!graph.nodes.length && (
+        <div className="empty">
+          <div className="empty-card">
+            <h3>Pick an alert to start an investigation</h3>
+            <ol>
+              <li><b>Investigate.</b> The agent walks the FalkorDB graph with Cypher; every node it touches lights up here.</li>
+              <li><b>Approve.</b> It proposes accounts to freeze. Nothing is frozen until a person approves.</li>
+              <li><b>Verify.</b> A path query re-checks the graph and proves no money route remains.</li>
+            </ol>
+          </div>
+        </div>
+      )}
+      {hud && (
+        <div className={`hud ${hud.verdict ?? ''}`}>
+          {hud.live && <span className="pulse" />}{hud.text}
+        </div>
+      )}
+      {graph.nodes.length > 0 && <div className="counts">{graph.nodes.length} nodes · {sent} transfers in view</div>}
       <ForceGraph2D
         ref={fg}
+        maxZoom={2} // a small subgraph would otherwise zoom-to-fit into giant blobs
         width={size.width}
         height={size.height}
         graphData={graph}
@@ -68,15 +92,19 @@ export default function GraphCanvas({ graph, latest, touched, roles }) {
             ctx.beginPath(); ctx.arc(n.x, n.y, r + 4, 0, 2 * Math.PI);
             ctx.fillStyle = 'rgba(255,209,102,0.35)'; ctx.fill();
           }
+          const role = roles.get(n.id);
           ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
           ctx.fillStyle = fill(n); ctx.fill();
-          const role = roles.get(n.id);
-          if (role || scale > 2.2) { // labels only when zoomed in, or for ring members
+          if (role) { // role outline, sized in screen pixels so it stays crisp at any zoom
+            ctx.lineWidth = 2 / scale; ctx.strokeStyle = ROLE_COLORS[role] ?? labelColor;
+            ctx.beginPath(); ctx.arc(n.x, n.y, r + 2 / scale + 1, 0, 2 * Math.PI); ctx.stroke();
+          }
+          if (role || scale >= 1.9) { // labels only when zoomed in, or for ring members
             const fontSize = 11 / scale;
             ctx.font = `${role ? '600 ' : ''}${fontSize}px system-ui, sans-serif`;
             ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-            ctx.fillStyle = labelColor;
-            ctx.fillText(role ? `${n.id} · ${role}` : n.id, n.x, n.y + r + 2);
+            ctx.fillStyle = role ? ROLE_COLORS[role] ?? labelColor : labelColor;
+            ctx.fillText(role ? `${n.id} · ${role}` : n.id, n.x, n.y + r + 3);
           }
           ctx.globalAlpha = 1;
         }}
@@ -85,9 +113,13 @@ export default function GraphCanvas({ graph, latest, touched, roles }) {
           ctx.fillStyle = color; ctx.fill();
         }}
       />
-      <div className="legend">
-        {Object.entries(COLORS).map(([k, c]) => <span key={k}><i style={{ background: c }} />{k}</span>)}
-      </div>
+      {graph.nodes.length > 0 && (
+        <div className="legend">
+          {Object.entries(COLORS).map(([k, c]) => <span key={k}><i style={{ background: c }} />{k}</span>)}
+          {roles.size > 0 && Object.entries(ROLE_COLORS).map(([k, c]) => <span key={k}><i className="ring" style={{ borderColor: c }} />{k}</span>)}
+          <span><i className="glow" />agent's latest step</span>
+        </div>
+      )}
     </div>
   );
 }
