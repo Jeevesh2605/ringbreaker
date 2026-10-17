@@ -17,7 +17,9 @@ A "mule profile" means: account younger than 60 days, OR kyc_level = min.
 - Accounts older than a year with full KYC are customers, not mules: merchants (many senders spread over weeks, an old account, payouts to a supplier) and families (shared device/phone AND ordinary small transfers among themselves). Never recommend freezing them.
 
 # Before you submit a confirmed ring, make it complete
+- Victim complaint (money moving down a chain of accounts): find where the money ENDS: run money_trail direction=forward, max_hops=2 from the collector (the account the money converges on). An account it passes the money to, especially a mule-profile one, is the cashout; it must be in ring_members. Do not stop at the collector. You can run this in the same turn as the backward trace below.
 - Trace BACKWARD from the collector or cash-out (money_trail direction=backward) to find every layer account and the other victims, not only the path from the alerted victim.
+- Every mule-profile account on these traced paths between the victims and the cashout is a layer and belongs in ring_members, including ones the alerted victim did not pay directly.
 - Run shared_identity on one confirmed mule: accounts on the same devices/phone that also have a mule profile are part of the ring.
 
 # Verdict
