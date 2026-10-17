@@ -32,9 +32,11 @@ actionsRouter.post('/actions/approve', requirePasscode, async (req, res, next) =
       results.push({ account_id, frozen: r.data.frozen, summary: r.summary });
     }
     const after = await actions.verify_cutoff({ case_id: caseId });
-    // Only record an outcome if something was actually frozen by this approval; a request whose
-    // freezes were all refused (unknown case, already frozen) must not close anything.
-    const closed = results.some((r) => r.frozen)
+    // Record the outcome whenever verify could run (the case exists and has ring accounts),
+    // even if this approval froze nothing new: a re-investigated ring whose accounts an earlier
+    // case already froze would otherwise stay "awaiting approval" forever. An unknown case
+    // gives routes = null, so nothing is closed. The status reflects the graph, not the clicks.
+    const closed = after.data.routes != null
       ? await actions.close_case({ case_id: caseId, cut: after.data.cut === true })
       : null;
     res.json({

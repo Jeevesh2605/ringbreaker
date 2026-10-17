@@ -19,6 +19,14 @@ RETURN properties(c) AS c, properties(al) AS alert, i.role AS role, properties(a
        x.type AS action, x.ts AS action_ts, x.approved_by AS approved_by, x.reason AS reason
 ORDER BY role, account.id`;
 
+// Freezes made by OTHER cases on this case's members. Without it, a re-investigation of an
+// already-frozen ring read as a contradiction: every account "frozen", yet "Actions: none yet".
+const PRIOR_CYPHER = `
+MATCH (c:Case {id: $case_id})-[:INCLUDES]->(a:Account)<-[x:ACTION]-(o:Case)
+WHERE o.id <> $case_id
+RETURN a.id AS account, o.id AS case_id, x.type AS action, x.ts AS ts, x.approved_by AS approved_by
+ORDER BY ts`;
+
 const ROLE_ORDER = ['victim', 'layer', 'collector', 'cashout'];
 const iso = (ms) => (ms ? new Date(ms).toISOString().replace('.000Z', 'Z') : '-');
 // Graph text is untrusted: keep it from breaking out of a markdown table cell.
@@ -32,7 +40,9 @@ export async function generateReport({ case_id }) {
   const members = rows.filter((r) => r.account)
     .sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.account.id.localeCompare(b.account.id));
   const actions = members.filter((m) => m.action).sort((a, b) => a.action_ts - b.action_ts);
-  const verify = await verifyCutoff({ case_id });
+  const [verify, prior] = await Promise.all([verifyCutoff({ case_id }), readQuery(PRIOR_CYPHER, { case_id })]);
+  const frozenBy = new Map(prior.map((p) => [p.account, p.case_id])); // account -> earlier case
+  const pending = (c.proposed_freezes ?? []).filter((id) => members.find((m) => m.account.id === id)?.account.status !== 'frozen');
 
   const md = [
     `# Investigation report ${c.id}`,
@@ -48,7 +58,7 @@ export async function generateReport({ case_id }) {
     '',
     '| Account | Role | KYC | Opened | Status |',
     '|---|---|---|---|---|',
-    ...members.map((m) => `| ${m.account.id} | ${m.role} | ${m.account.kyc_level} | ${iso(m.account.created_at).slice(0, 10)} | ${m.account.status} |`),
+    ...members.map((m) => `| ${m.account.id} | ${m.role} | ${m.account.kyc_level} | ${iso(m.account.created_at).slice(0, 10)} | ${m.account.status}${!m.action && frozenBy.has(m.account.id) ? ` (by ${frozenBy.get(m.account.id)})` : ''} |`),
     '',
     '## Evidence (from the agent, citing graph facts)',
     '',
@@ -56,9 +66,10 @@ export async function generateReport({ case_id }) {
     '',
     '## Actions',
     '',
-    ...(actions.length
-      ? actions.map((a) => `- ${iso(a.action_ts)}: **${a.action}** ${a.account.id}, approved by ${cell(a.approved_by)}${a.reason ? ` (${cell(a.reason)})` : ''}`)
-      : ['- None yet. Proposed freezes awaiting approval: ' + ((c.proposed_freezes ?? []).join(', ') || 'none')]),
+    ...actions.map((a) => `- ${iso(a.action_ts)}: **${a.action}** ${a.account.id}, approved by ${cell(a.approved_by)}${a.reason ? ` (${cell(a.reason)})` : ''}`),
+    ...prior.map((p) => `- ${iso(p.ts)}: **${p.action}** ${p.account} by an earlier case, ${p.case_id}, approved by ${cell(p.approved_by)}`),
+    ...(!actions.length && !prior.length ? ['- None yet.'] : []),
+    ...(pending.length ? [`- Proposed freezes awaiting approval: ${pending.join(', ')}`] : []),
     '',
     '## Cut-off verification',
     '',

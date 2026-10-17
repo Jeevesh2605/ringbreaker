@@ -10,6 +10,7 @@ const ROOT = new URL('../../', import.meta.url).pathname;
 const { actions } = await import('../src/tools/index.js');
 const { readQuery, getGraph, close } = await import('../src/db.js');
 const { alertsRouter, alertStatus } = await import('../src/routes/alerts.js');
+const { actionsRouter } = await import('../src/routes/actions.js');
 const express = (await import('express')).default;
 
 // GET /api/alerts through the real router, on the test graph.
@@ -86,6 +87,29 @@ test('approved freezes cut every route, with an audit edge each', async () => {
   const [audit] = await readQuery('MATCH (:Case {id:$id})-[x:ACTION]->() RETURN count(x) AS n, collect(DISTINCT x.approved_by) AS by', { id: caseId });
   assert.equal(audit.n, A.freeze.length);
   assert.deepEqual(audit.by, ['tester']);
+});
+
+// Oct 17, live: ALT001 was investigated again without a reset. The new case's accounts were
+// all frozen by the earlier case, so the report said "frozen" next to "Actions: none yet",
+// and approving froze nothing, which left the alert stuck at "awaiting approval".
+test('re-investigating an already-frozen ring: report names the earlier case; approval closes it', async () => {
+  const c2 = await actions.create_case({ alert_id: 'ALT001', verdict });
+  const id2 = c2.data.case_id;
+  const md = (await actions.generate_report({ case_id: id2 })).data.markdown;
+  assert.match(md, new RegExp(`by an earlier case, ${caseId}`));
+  assert.match(md, new RegExp(`frozen \\(by ${caseId}\\)`));
+  assert.doesNotMatch(md, /awaiting approval/, 'nothing is left to approve');
+
+  const app = express().use(express.json()).use('/api', actionsRouter);
+  const server = app.listen(0);
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/actions/approve`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ caseId: id2, approvedBy: 'tester', actions: A.freeze }) });
+    const body = await res.json();
+    assert.ok(body.results.every((r) => !r.frozen), 'already frozen: no second freeze');
+    assert.equal(body.case_status, 'closed');
+  } finally { server.close(); }
+  assert.equal((await getAlerts()).find((x) => x.id === 'ALT001').status, 'closed');
 });
 
 // The case the live final test produced: the agent stopped at collector ACC1900 and missed
