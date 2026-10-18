@@ -33,7 +33,7 @@ Mule rings launder scam money through chains of ordinary-looking bank accounts. 
 - [ ] New repo, all main implementation done inside the window (general libraries/templates are fine).
 - [x] Live deployment link (preferred); otherwise demo video + complete local setup instructions. (Both: live link + README setup.)
 - [ ] Coding assistant usage is allowed: I must review the code and be able to explain the architecture and security.
-- [ ] Blog post written for the Best Blog prize.
+- [x] Blog post written for the Best Blog prize. (dev.to draft written Oct 18.)
 - [ ] Submit with buffer, not in the last hour.
 
 ## 4. Architecture
@@ -306,7 +306,7 @@ Scaffolding rule: do not create everything up front. Day 1 only needs `data/`, `
 - [x] Fix demo rough edges; reseed endpoint; error states. (Reset demo button, friendly 401/409/quota/offline/dropped-stream messages.)
 - [x] README with architecture diagram, local setup, deploy notes, data disclosure, AI-assistant disclosure.
 - [ ] Record the 3-minute demo video (section 13).
-- [ ] Write the blog (notes collected during Days 1-3).
+- [x] Write the blog (notes collected during Days 1-3). (dev.to draft; publish before submitting.)
 - [ ] Submit by the evening, well before 11:59 PM IST.
 
 **Cut list if behind (cut in this order):** replay button, report polish, Ring C nuance, `expand_ring` (fold into other tools), Cytoscape styling. **Never cut:** the verify step, the trace/highlight, the approval gate.
