@@ -99,6 +99,24 @@ export function tooLargeFromError(e) {
 }
 const MAX_INPUT_SHRINKS = 2;
 
+// For a confirmed ring with a collector/cashout: the backward money_trail that reaches every
+// branch feeding it, or null if the trace already ran it (or there is no money-flow shape).
+// Reach: collector <- second layer <- first layer = 3 hops; from the cashout it is one more.
+function missingBacktrace(verdict, trace) {
+  if (verdict.verdict !== 'ring_confirmed') return null;
+  const members = verdict.ring_members;
+  const collector = members.find((m) => m.role === 'collector');
+  const sink = collector ?? members.find((m) => m.role === 'cashout');
+  if (!sink) return null;
+  const hops = collector ? 3 : 4;
+  const done = trace.some((e) => e.tool === 'money_trail' && e.args?.direction === 'backward'
+    && e.args?.account_id === sink.account_id && Number(e.args?.max_hops) >= hops);
+  if (done) return null;
+  // Reuse the incident window the agent already chose, so background payments stay filtered.
+  const since = trace.find((e) => e.args?.since != null)?.args.since ?? 0;
+  return { account_id: sink.account_id, direction: 'backward', max_hops: hops, since };
+}
+
 // signal (optional): cancels the run, e.g. when the browser closes the SSE stream.
 // client (optional): a Groq-compatible client; tests pass a fake one so they spend no tokens.
 export async function investigate(alertId, { onEvent = () => {}, signal, client } = {}) {
@@ -127,6 +145,7 @@ export async function investigate(alertId, { onEvent = () => {}, signal, client 
   const touchedEdges = new Set();
   const usage = { prompt_tokens: 0, completion_tokens: 0 };
   let verdictRetryUsed = false;
+  let backtraceNudged = false;
   let malformedRetries = 0;
 
   try {
@@ -206,16 +225,46 @@ export async function investigate(alertId, { onEvent = () => {}, signal, client 
       if (submit) {
         const { args, error } = parseArgs(submit.function.arguments);
         const check = error ? { ok: false, errors: [error] } : validateVerdict(args, touchedNodes);
-        if (check.ok) {
+        // Completeness guard: a forward trace from the alerted victim only finds the branch that
+        // victim paid; mules fed by the ring's OTHER victims join further down (Ring A's ACC1895/
+        // ACC1896 feed the second layer). The prompt asks for a backward trace from the collector,
+        // but the model skips it or picks too few hops, so the CODE runs it once (same read-only
+        // money_trail tool, emitted as a normal trace event) and hands the result back with the
+        // verdict for a resubmit. Not on the last step, so a resubmit always has a turn left.
+        const backArgs = check.ok && !backtraceNudged && !lastStep ? missingBacktrace(check.verdict, trace) : null;
+        if (backArgs) {
+          backtraceNudged = true; // separate from verdictRetryUsed: this is a completeness check, not a schema error
+          onEvent({ type: 'verdict_rejected', step, errors: [`completeness check: tracing money backward from ${backArgs.account_id}`] });
+          const t0 = Date.now();
+          let content;
+          try {
+            const res = await tools.money_trail.run(backArgs);
+            const event = { type: 'tool', step, tool: 'money_trail', args: backArgs, ms: Date.now() - t0,
+              cypher: res.cypher, summary: res.summary, nodes: res.nodes ?? [], edges: res.edges ?? [] };
+            event.nodes.forEach((n) => touchedNodes.add(n));
+            event.edges.forEach((e) => touchedEdges.add(e));
+            trace.push(event);
+            onEvent(event);
+            content = `Verdict not accepted yet: completeness check. Backward trace from ${backArgs.account_id} ` +
+              `(every branch that fed it):\n${toModelText(res)}\n` +
+              'Add every account on these paths to ring_members: an old, full-KYC account that only pays in is a victim (never freeze); ' +
+              'a new, kyc=min account that forwards money is a layer (recommend freeze). Then resubmit.';
+          } catch (e) {
+            content = `Completeness check failed (${e.message}). Resubmit your verdict.`;
+          }
+          messages.push({ role: 'tool', tool_call_id: submit.id, name: 'submit_verdict', content });
+        } else if (check.ok) {
           const verdict = { ...check.verdict, touched: { nodes: [...touchedNodes], edges: [...touchedEdges] } };
           onEvent({ type: 'verdict', step, verdict });
           return { verdict, trace, usage, steps: step, ms: Date.now() - started, models: modelsUsed };
         }
-        if (verdictRetryUsed) throw new Error(`invalid verdict after retry: ${check.errors.join('; ')}`);
-        verdictRetryUsed = true;
-        onEvent({ type: 'verdict_rejected', step, errors: check.errors });
-        messages.push({ role: 'tool', tool_call_id: submit.id, name: 'submit_verdict',
-          content: `Verdict rejected, fix and resubmit: ${check.errors.join('; ')}` });
+        if (!check.ok) {
+          if (verdictRetryUsed) throw new Error(`invalid verdict after retry: ${check.errors.join('; ')}`);
+          verdictRetryUsed = true;
+          onEvent({ type: 'verdict_rejected', step, errors: check.errors });
+          messages.push({ role: 'tool', tool_call_id: submit.id, name: 'submit_verdict',
+            content: `Verdict rejected, fix and resubmit: ${check.errors.join('; ')}` });
+        }
       }
 
       // 2) Read tools, run in parallel when the model asks for several. A failing tool becomes
